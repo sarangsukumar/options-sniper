@@ -1,0 +1,36 @@
+# Ignore python system cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore Node.js packages
+node_modules/
+node_modules
+
+# Ignore raw large CSV data files to comply with GitHub 100MB limits
+data/*.csv
+data/*.csv.bak*
+data/*.csv.bak_before_dedup
+data/*.csv.bak_prod
+data/*.csv_spot_backup.csv
+data/*.txt
+
+# Ignore historical cache pickles and logs to start clean
+historical_models/output/*.pkl
+historical_models/output/*.csv
+historical_models/output/*.pdf
+
+# Force track our highly compressed, lookahead-free dataset archive
+!data/data_input_files.tar.gz
+
+# Force track package management
+!data/package.json
+!data/package-lock.json
+
+# Ignore local temporary/log files and scripts
+*.log
+*.txt
+scratch/
+check_daily_quarters.py
+find_winner.py

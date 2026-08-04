@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "adm-zip": "^0.5.18",
+    "breezeconnect": "^1.0.31",
+    "csv-parser": "^3.2.1",
+    "mysql": "^2.18.1"
+  }
+}

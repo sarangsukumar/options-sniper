@@ -1,0 +1,6 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-07-20,CHOLAFIN,1783.2,1774.7,625,200.0,-5512.5,Fallback/Standard Limit Fill,Day 1,
+2026-07-20,GRASIM,3145.0,3154.4,250,200.0,2150.0000000000227,Custom Limit Fill,Day 1,
+2026-07-20,ICICIGI,1624.0,1619.5,325,200.0,-1662.5,Fallback/Standard Limit Fill,Day 1,
+2026-07-20,NESTLEIND,1456.5,1458.5,500,200.0,800.0,Custom Limit Fill,Day 1,
+2026-07-20,OBEROIRLTY,1868.5,1883.9,350,200.0,5190.000000000032,Custom Limit Fill,Day 1,

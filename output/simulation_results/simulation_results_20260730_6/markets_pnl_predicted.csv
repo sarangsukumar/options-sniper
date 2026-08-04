@@ -1,0 +1,2 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-07-20,GRASIM,3145.0,3154.4,250,200.0,2150.0000000000227,Custom Limit Fill,Day 1,

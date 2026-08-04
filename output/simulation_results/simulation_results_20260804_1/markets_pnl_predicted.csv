@@ -1,0 +1,4 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-08-03,MANAPPURAM,365.3,367.05,3000,200.0,5050.0,Custom Limit Fill,Day 1,
+2026-08-03,MUTHOOTFIN,2890.2,2892.0,275,200.0,295.00000000005,Custom Limit Fill,Day 1,
+2026-08-03,SIEMENS,3929.2,3945.0,175,200.0,2565.000000000032,Custom Limit Fill,Day 1,
