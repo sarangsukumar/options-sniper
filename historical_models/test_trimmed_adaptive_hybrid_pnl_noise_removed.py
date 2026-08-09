@@ -29,16 +29,29 @@ def build_hybrid_cache(caches, rolling_window=30):
     all_dates_sets = [set(cache.keys()) for cache in caches.values()]
     common_dates = sorted(list(set.intersection(*all_dates_sets)))
     
-    ensemble_cache = {}
-    historical_daily_medians = []
-    historical_trades = []
+    # Helper to resolve stockname and actual PnL
+    def row_name_lookup(df, idx):
+        return df.iloc[idx]['stockname'] if idx < len(df) else ""
+        
+    def row_pnl_lookup(df, idx):
+        return df.iloc[idx]['pnl'] if idx < len(df) else 0.0
+
+    print(f"\n[*] Starting pre-computation of model features across {len(common_dates)} days...")
     
-    state_stats = {'trimmed': 0, 'adaptive': 0, 'defensive': 0}
+    # 1. Pre-compute and cache all daily statistics to make the optimizer run at lightning speed
+    precomputed_data = []
+    historical_daily_medians = []
+
     
     for dt in common_dates:
         yearly_entry = caches["Yearly"][dt]
         if isinstance(yearly_entry, dict) and yearly_entry.get('status') == 'SKIPPED':
-            ensemble_cache[dt] = yearly_entry
+            precomputed_data.append({
+                'date': dt,
+                'year': dt.year,
+                'status': 'SKIPPED',
+                'reason': 'Skipped in Yearly cache'
+            })
             continue
             
         base_df = yearly_entry.copy()
@@ -51,39 +64,40 @@ def build_hybrid_cache(caches, rolling_window=30):
                 pred_series_list.append(base_df["stockname"].map(mapped_pred))
                 
         if len(pred_series_list) == 0:
-            ensemble_cache[dt] = {'status': 'SKIPPED', 'reason': 'All models skipped'}
+            precomputed_data.append({
+                'date': dt,
+                'year': dt.year,
+                'status': 'SKIPPED',
+                'reason': 'All models skipped'
+            })
             continue
             
         stacked_preds = pd.concat(pred_series_list, axis=1)
         
-        # Determine Lookahead-Free State Gate
-        if len(historical_trades) >= 15:
-            recent_trades = historical_trades[-15:]
-            wins = sum(1 for p in recent_trades if p > 0)
-            trailing_wr = wins / 15.0
-            trailing_avg_pnl = sum(recent_trades) / 15.0
-        else:
-            trailing_wr = 0.75
-            trailing_avg_pnl = 1500.0  # Default to strong
-            
-        if trailing_wr >= 0.75 or trailing_avg_pnl >= 1500.0:
-            k_base = 0.00
-            state_stats['trimmed'] += 1
-        elif trailing_wr < 0.60 and trailing_avg_pnl < 500.0:
-            k_base = 0.90
-            state_stats['defensive'] += 1
-        else:
-            k_base = 0.60
-            state_stats['adaptive'] += 1
-            
+        # Pre-compute model standard deviation for each stock on this day
+        stock_features = []
         daily_std_devs = []
         for idx, row in stacked_preds.iterrows():
             preds = row.dropna().values
-            if len(preds) > 1:
-                daily_std_devs.append(np.std(preds))
-            else:
-                daily_std_devs.append(0.0)
-                
+            trimmed_mean_val = 0.0
+            if len(preds) > 0:
+                if len(preds) >= 4:
+                    sorted_preds = sorted(preds)
+                    trimmed = sorted_preds[1:-1]
+                    trimmed_mean_val = np.mean(trimmed)
+                else:
+                    trimmed_mean_val = np.median(preds)
+                    
+            std_dev = np.std(preds) if len(preds) > 1 else 0.0
+            daily_std_devs.append(std_dev)
+            
+            stock_features.append({
+                'stockname': row_name_lookup(base_df, idx),
+                'trimmed_mean_val': trimmed_mean_val,
+                'std_dev': std_dev,
+                'pnl': row_pnl_lookup(base_df, idx)
+            })
+            
         median_std_dt = np.median(daily_std_devs) if len(daily_std_devs) > 0 else 0.0
         historical_daily_medians.append(median_std_dt)
         
@@ -92,31 +106,164 @@ def build_hybrid_cache(caches, rolling_window=30):
         if baseline_std <= 0:
             baseline_std = 1.0
             
-        combined_preds = []
-        for idx, row in stacked_preds.iterrows():
-            preds = row.dropna().values
-            if len(preds) == 0:
-                combined_preds.append(0.0)
+        precomputed_data.append({
+            'date': dt,
+            'year': dt.year,
+            'status': 'ACTIVE',
+            'stock_features': stock_features,
+            'baseline_std': baseline_std,
+            'base_df': base_df
+        })
+        
+    print("✔ Pre-computation complete.")
+    
+
+
+
+    # 2. Fast lookahead-free simulation function for grid search
+    def run_fast_switcher_sim(subset, k_super, k_trimmed, k_adaptive, k_defensive):
+        sim_trades = []
+        hist_trades = []
+        for day in subset:
+            if day['status'] == 'SKIPPED':
                 continue
                 
-            if len(preds) >= 4:
-                sorted_preds = sorted(preds)
-                trimmed = sorted_preds[1:-1]
-                trimmed_mean_val = np.mean(trimmed)
+            # Determine state causally from historical trades
+            if len(hist_trades) >= 10:
+                recent = hist_trades[-10:]
+                wins = sum(1 for p in recent if p > 0)
+                trailing_wr = wins / 10.0
+                trailing_avg_pnl = sum(recent) / 10.0
             else:
-                trimmed_mean_val = np.median(preds)
+                # Default Neutral state for warm-ups (no aggressive forcing!)
+                trailing_wr = 0.65
+                trailing_avg_pnl = 800.0
                 
-            std_dev = np.std(preds) if len(preds) > 1 else 0.0
-            K_dyn = k_base * (std_dev / baseline_std)
-            K_dyn = min(1.5, K_dyn)
+            # Regime bounds
+            if trailing_wr >= 0.85 and trailing_avg_pnl >= 2500.0:
+                k_base = k_super
+            elif trailing_wr >= 0.70 or trailing_avg_pnl >= 1000.0:
+                k_base = k_trimmed
+            elif trailing_wr < 0.60 and trailing_avg_pnl < 500.0:
+                k_base = k_defensive
+            else:
+                k_base = k_adaptive
+                
+            # Calculate combined predictions
+            day_preds = []
+            for feat in day['stock_features']:
+                K_dyn = k_base * (feat['std_dev'] / day['baseline_std'])
+                K_dyn = max(0.0, min(1.5, K_dyn)) # Strictly bound K_dyn to avoid unbounded or negative multipliers
+                
+                comb = feat['trimmed_mean_val'] - K_dyn * feat['std_dev']
+                day_preds.append((comb, feat['pnl']))
+                
+            day_preds.sort(key=lambda x: x[0], reverse=True)
+            top_4 = day_preds[:4]
             
-            combined = trimmed_mean_val - K_dyn * std_dev
-            combined_preds.append(combined)
+            for score, act_pnl in top_4:
+                if not np.isnan(act_pnl):
+                    sim_trades.append(act_pnl)
+                    hist_trades.append(act_pnl)
+                    
+        if len(sim_trades) < 10:
+            return -999.0
+            
+        # Calculate Average PnL of this parameter configuration
+        return np.mean(sim_trades)
+
+    # 3. Lookahead-Free Grid Search Optimizer
+    def optimize_parameters_for_year(historical_precomputed):
+        print(f"   • Optimizing parameters on {len(historical_precomputed)} days of historical data...")
+        
+        # Grid parameters - strictly non-negative to eliminate fragile disagreement rewards!
+        grid_k_super = [0.00, 0.10]
+        grid_k_trimmed = [0.10, 0.20]
+        grid_k_adaptive = [0.20, 0.30, 0.40]
+        grid_k_defensive = [0.50, 0.60, 0.80]
+        
+        best_score = -999.0
+        best_params = (0.00, 0.10, 0.30, 0.60) # Balanced defaults
+        
+        for k_sup in grid_k_super:
+            for k_tri in grid_k_trimmed:
+                for k_ada in grid_k_adaptive:
+                    for k_def in grid_k_defensive:
+                        score = run_fast_switcher_sim(historical_precomputed, k_sup, k_tri, k_ada, k_def)
+                        if score > best_score:
+                            best_score = score
+                            best_params = (k_sup, k_tri, k_ada, k_def)
+                            
+        print(f"   ✔ Winning parameters found (Avg PnL: {best_score:.4f}): K_super={best_params[0]:.2f}, K_trimmed={best_params[1]:.2f}, K_adaptive={best_params[2]:.2f}, K_defensive={best_params[3]:.2f}")
+        return best_params
+
+    # 4. Master Walk-Forward Simulation Loop
+    ensemble_cache = {}
+    historical_trades = []
+    
+    # Default parameters for bootstrap period (2019-2020)
+    current_params = (0.10, 0.30, 0.60, 1.20)
+    last_optimized_year = None
+    
+    state_stats = {'super_trimmed': 0, 'trimmed': 0, 'adaptive': 0, 'defensive': 0}
+    
+    for day in precomputed_data:
+        dt = day['date']
+        yr = day['year']
+        
+        if day['status'] == 'SKIPPED':
+            ensemble_cache[dt] = {'status': 'SKIPPED', 'reason': day.get('reason', 'Skipped')}
+            continue
+            
+        # Trigger Walk-Forward Optimization at the start of any new year (from 2021 onwards)
+        if yr >= 2021 and yr != last_optimized_year:
+            print(f"\n[🔄] Year change detected to {yr}. Triggering lookahead-free hyperparameter tuning...")
+            history_subset = [d for d in precomputed_data if d['year'] < yr and d['status'] == 'ACTIVE']
+            current_params = optimize_parameters_for_year(history_subset)
+            last_optimized_year = yr
+            
+        k_sup, k_tri, k_ada, k_def = current_params
+        
+        # Determine State causally
+        if len(historical_trades) >= 10:
+            recent_trades = historical_trades[-10:]
+            wins = sum(1 for p in recent_trades if p > 0)
+            trailing_wr = wins / 10.0
+            trailing_avg_pnl = sum(recent_trades) / 10.0
+        else:
+            # Default Neutral state for warm-ups (no aggressive forcing!)
+            trailing_wr = 0.65
+            trailing_avg_pnl = 800.0
+            
+        # Select active state
+        if trailing_wr >= 0.85 and trailing_avg_pnl >= 2500.0:
+            k_base = k_sup
+            state_stats['super_trimmed'] = state_stats.get('super_trimmed', 0) + 1
+        elif trailing_wr >= 0.70 or trailing_avg_pnl >= 1000.0:
+            k_base = k_tri
+            state_stats['trimmed'] += 1
+        elif trailing_wr < 0.60 and trailing_avg_pnl < 500.0:
+            k_base = k_def
+            state_stats['defensive'] += 1
+        else:
+            k_base = k_ada
+            state_stats['adaptive'] += 1
+            
+        # Generate combined predictions for ensemble cache row
+        base_df = day['base_df']
+        combined_preds = []
+        
+        for feat in day['stock_features']:
+            K_dyn = k_base * (feat['std_dev'] / day['baseline_std'])
+            K_dyn = max(0.0, min(1.5, K_dyn)) # Restrict K_dyn bounds to avoid unbounded or negative multipliers
+            
+            comb = feat['trimmed_mean_val'] - K_dyn * feat['std_dev']
+            combined_preds.append(comb)
             
         base_df["pred_pnl"] = combined_preds
         ensemble_cache[dt] = base_df
         
-        # Save actual results to update state gate lookahead-free
+        # Save actual results to trailing tracker (Causal Model Performance Tracker)
         base_df_sorted = base_df.sort_values(by="pred_pnl", ascending=False)
         top_4_actuals = base_df_sorted.head(4)["pnl"].dropna().values
         for p in top_4_actuals:
@@ -127,10 +274,11 @@ def build_hybrid_cache(caches, rolling_window=30):
     with open(ensemble_cache_path, 'wb') as f:
         pickle.dump(ensemble_cache, f, protocol=pickle.HIGHEST_PROTOCOL)
         
-    print(f"\n[+] Noise-Removed Hybrid Cache Built Successfully:")
-    print(f"    • Trimmed State Days (K_base=0.00)  : {state_stats['trimmed']} days")
-    print(f"    • Adaptive State Days (K_base=0.60) : {state_stats['adaptive']} days")
-    print(f"    • Defensive State Days (K_base=0.90): {state_stats['defensive']} days")
+    print(f"\n[+] Lookahead-Free WFHO Hybrid Cache Built Successfully:")
+    print(f"    • Super-Trimmed State Days: {state_stats.get('super_trimmed', 0)} days")
+    print(f"    • Trimmed State Days      : {state_stats['trimmed']} days")
+    print(f"    • Adaptive State Days     : {state_stats['adaptive']} days")
+    print(f"    • Defensive State Days    : {state_stats['defensive']} days")
 
 def run_simulation(max_trades, capital):
     cmd = [sys.executable, "dynamic_threshold.py", "ensemble"]

@@ -13,6 +13,10 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PARENT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PARENT_DIR"
 
+# --- Auto-heal and Sync CSV Data Files from MySQL ---
+python3 pipeline/self_heal_production_data.py
+
+
 echo "========================================================================="
 echo "               ICICI DIRECT ML - UNIFIED TRADING PIPELINE"
 echo "========================================================================="

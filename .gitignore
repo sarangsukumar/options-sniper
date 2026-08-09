@@ -34,3 +34,5 @@ historical_models/output/*.pdf
 scratch/
 check_daily_quarters.py
 find_winner.py
+sandbox_2026/*/data/*.csv
+sandbox_massive/*/data/*.csv

@@ -1050,26 +1050,30 @@ def main():
             df_non_zero_trades = df_pnl_hist[df_pnl_hist['pnl'] != 0.0]
             recent_trades = df_non_zero_trades['pnl'].tail(15).values.tolist()
             
-            if len(recent_trades) >= 15:
+            if len(recent_trades) >= 10:
                 wins = sum(1 for p in recent_trades if p > 0)
-                trailing_wr = wins / 15.0
-                trailing_avg_pnl = sum(recent_trades) / 15.0
+                trailing_wr = wins / 10.0
+                trailing_avg_pnl = sum(recent_trades) / 10.0
             else:
-                trailing_wr = 0.75
-                trailing_avg_pnl = 1500.0
+                # Default Neutral state for warm-ups (no aggressive forcing!)
+                trailing_wr = 0.65
+                trailing_avg_pnl = 800.0
                 
-            log(f"Trailing Win Rate: {trailing_wr:.1%}, Trailing Avg P&L: Rs {trailing_avg_pnl:,.2f}")
+            log(f"Trailing Win Rate (10-trade lookback): {trailing_wr:.1%}, Trailing Avg P&L: Rs {trailing_avg_pnl:,.2f}")
             
-            # Determine k_base
-            if trailing_wr >= 0.75 or trailing_avg_pnl >= 1500.0:
+            # Determine k_base (Lookahead-Free Optimized 2026 Parameters)
+            if trailing_wr >= 0.85 and trailing_avg_pnl >= 2500.0:
                 k_base = 0.00
-                regime_name = "HIGH PERFORMANCE (K=0.00)"
+                regime_name = "OPTIMIZED SUPER-TRIMMED MOMENTUM (K=0.00)"
+            elif trailing_wr >= 0.70 or trailing_avg_pnl >= 1000.0:
+                k_base = 0.10
+                regime_name = "OPTIMIZED TRIMMED (K=0.10)"
             elif trailing_wr < 0.60 and trailing_avg_pnl < 500.0:
-                k_base = 0.90
-                regime_name = "DEGRADED PERFORMANCE (K=0.90)"
+                k_base = 0.50
+                regime_name = "OPTIMIZED DEFENSIVE (K=0.50)"
             else:
-                k_base = 0.60
-                regime_name = "STANDARD REGIME (K=0.60)"
+                k_base = 0.20
+                regime_name = "OPTIMIZED ADAPTIVE STANDARD (K=0.20)"
                 
             log(f"Active Regime: {regime_name}")
             
@@ -1111,7 +1115,7 @@ def main():
                 std_dev = np.std(preds_row)
                 
                 K_dyn = k_base * (std_dev / baseline_std)
-                K_dyn = min(1.5, K_dyn)
+                K_dyn = max(0.0, min(1.5, K_dyn))
                 
                 # Trimmed mean
                 sorted_preds = sorted(preds_row)

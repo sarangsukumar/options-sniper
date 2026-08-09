@@ -240,6 +240,8 @@ def load_pnl() -> pd.DataFrame:
     df = df.dropna(subset=['pnl']).copy()
     df = df[df['dt_parsed'] >= pd.to_datetime(START_DATE)].copy()
     df = df.sort_values(['stockname', 'dt_parsed']).reset_index(drop=True)
+    df = df.drop_duplicates(subset=['dt_parsed', 'stockname'], keep='last').copy()
+
     df['day']       = df['dt_parsed'].dt.day_name()
     df['year']      = df['dt_parsed'].dt.year
     df['month_idx'] = df['dt_parsed'].dt.to_period('M').astype(str)
@@ -254,6 +256,8 @@ def load_pnl() -> pd.DataFrame:
         f11 = pd.read_csv(f11_path)
         f11['dt_parsed'] = pd.to_datetime(f11['Date'], format='mixed', dayfirst=True)
         f11 = f11.rename(columns={'Stock': 'stockname'})
+        f11 = f11.drop_duplicates(subset=['dt_parsed', 'stockname'], keep='last')
+
         
         # Rename columns dynamically if they end with _pct
         rename_dict = {}
@@ -281,6 +285,8 @@ def load_pnl() -> pd.DataFrame:
         gap = pd.read_csv(gap_path)
         gap['dt_parsed'] = pd.to_datetime(gap['Date'], format='mixed', dayfirst=True)
         gap = gap.rename(columns={'Stock': 'stockname'})
+        gap = gap.drop_duplicates(subset=['dt_parsed', 'stockname'], keep='last')
+
         for c in ['Gap_Pct', 'Open', 'Prev_Close', 'Volume_Change_Pct']:
             if c in gap.columns:
                 gap[c] = pd.to_numeric(gap[c], errors='coerce')

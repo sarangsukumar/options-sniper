@@ -14,6 +14,10 @@ _DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 parent_dir="$(dirname "$_DIR")"
 cd "$parent_dir"
 
+# --- Auto-heal and Sync CSV Data Files from MySQL ---
+python3 pipeline/self_heal_production_data.py
+
+
 echo "======================================================================="
 echo "🚀 Starting Daily Futures Simulation Pipeline"
 echo "Timestamp: $(date)"

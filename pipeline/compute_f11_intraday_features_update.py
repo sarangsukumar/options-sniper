@@ -29,10 +29,16 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Save directly to the data/ subfolder of best ML
 OUTPUT_FILE = os.path.join(os.path.dirname(SCRIPT_DIR), 'data', 'f11_intraday_features_all.csv')
 
-# Fetch intraday features ONLY for today
+# Fetch intraday features ONLY for today or custom argument date
+import sys
 today_str = datetime.now().strftime('%Y-%m-%d')
-START_DATE = today_str
-END_DATE = today_str
+if len(sys.argv) > 1 and sys.argv[1] != "":
+    START_DATE = sys.argv[1]
+    END_DATE = sys.argv[1]
+    print(f"Using custom date from command line: {START_DATE}")
+else:
+    START_DATE = today_str
+    END_DATE = today_str
 print(f"Forced to fetch intraday features ONLY for today: {START_DATE}")
 N_WORKERS = 4  # Parallel workers for groupby computation (set to 1 to disable)
 

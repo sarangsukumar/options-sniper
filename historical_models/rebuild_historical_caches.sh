@@ -1,7 +1,13 @@
 #!/bin/bash
 set -e
 
+# Activate python virtual environment
+if [ -f "/home/ubuntu/venv/bin/activate" ]; then
+    source /home/ubuntu/venv/bin/activate
+fi
+
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
 cd "$DIR"
 
 echo "=========================================================================="

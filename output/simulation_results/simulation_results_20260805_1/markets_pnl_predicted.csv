@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-08-04,MUTHOOTFIN,2891.9,2918.6,275,200.0,7142.49999999995,Custom Limit Fill,Day 1,
+2026-08-04,POWERGRID,282.7,283.55,1900,200.0,1415.0000000000432,Custom Limit Fill,Day 1,
+2026-08-04,TRENT,3083.0,3099.0,225,200.0,3400.0,Custom Limit Fill,Day 1,
+2026-08-04,UPL,584.75,581.5,1355,200.0,-4603.75,Fallback/Standard Limit Fill,Day 1,
