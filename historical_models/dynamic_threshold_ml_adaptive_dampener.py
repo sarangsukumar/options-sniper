@@ -37,7 +37,7 @@ from sklearn.preprocessing import StandardScaler
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(_THIS_DIR, "output")
-DATA_DIR = os.path.join(_THIS_DIR, "../../data")
+DATA_DIR = os.path.join(os.path.dirname(_THIS_DIR), 'data')
 
 def run_backtest():
     freqs = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly']
@@ -180,14 +180,20 @@ def run_backtest():
                         dual_confirmed_stock = s
                         break
                         
-                if dual_confirmed_stock and len(static_stocks) >= 4:
+                if dual_confirmed_stock and len(static_stocks) >= 2:
+                    stock_to_drop = None
+                    for s in reversed(static_stocks):
+                        if s != dual_confirmed_stock:
+                            stock_to_drop = s
+                            break
+                            
                     for idx, r in day_static.iterrows():
                         stock = r['stock']
                         pnl = r['actual_pnl']
                         
                         if stock == dual_confirmed_stock:
                             day_pnl_sum += pnl * 2
-                        elif stock != static_stocks[3]:
+                        elif stock != stock_to_drop:
                             day_pnl_sum += pnl
                 else:
                     for idx, r in day_static.iterrows():
