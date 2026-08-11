@@ -1169,147 +1169,24 @@ def main():
             bad_expiry = bad_exp
             test_scored = score_all_candidates(test, bad_expiry)
         
-        # Step 7: Determine today's dynamic threshold and suspension states from existing CSV logs
-        log("Calculating today's dynamic threshold and stock suspension states from historical logs...")
-        
-        # Tracker states
-        current_thr = 1800.0
-        consec_loss = 0
-        consec_win = 0
-        stock_consec_losses = {}
-        stock_cum_pnl = {}
-        stock_suspension_end = {}
-        
-        trades_dt_path = os.path.join(_THIS_DIR, 'output', 'trades_dynamic_threshold.csv')
-        trades_ts_path = os.path.join(_THIS_DIR, 'output', 'trades_ticker_suspension.csv')
-        daily_dt_path = os.path.join(_THIS_DIR, 'output', 'daily_dynamic_threshold.csv')
-        
-        # Track today's DTE
-        days_to_expiry = test['days_to_expiry'].iloc[0]
+        # ─────────────────────────────────────────────────────────────────────
+        # STEP 7 (CHAMPION): CHAMPION STRATEGY — ML ADAPTIVE DAMPENER + DUAL CONFIRMATION
+        # ─────────────────────────────────────────────────────────────────────
+        log("="*70)
+        log("CHAMPION STRATEGY: ML ADAPTIVE DAMPENER + DUAL CONFIRMATION")
+        log("="*70)
+
+        # ── 7A. Safety guards ──────────────────────────────────────────────
+        day_name = today_dt.day_name()
         is_friday_lock = (day_name == 'Friday')
-        is_toxic_expiry = (days_to_expiry in bad_expiry)
+        days_to_expiry = test['days_to_expiry'].iloc[0] if not test.empty else -1
         
-        # Calculate dynamic threshold from history
-        if os.path.exists(daily_dt_path):
-            try:
-                df_daily_dt = pd.read_csv(daily_dt_path)
-                df_daily_dt['parsed_date'] = pd.to_datetime(df_daily_dt['date'])
-                df_daily_dt_past = df_daily_dt[df_daily_dt['parsed_date'] < today_dt].sort_values('parsed_date')
-                
-                # Replay threshold logic on the historical sequence to find current_thr today
-                current_thr = 1800.0
-                consec_loss = 0
-                consec_win = 0
-                past_traded_pnls = []
-                
-                for _, row in df_daily_dt_past.iterrows():
-                    status = row.get('status', '')
-                    pnl = float(row.get('pnl', 0.0))
-                    d_name = pd.to_datetime(row['date']).day_name()
-                    
-                    row_date = pd.to_datetime(row['date'])
-                    df_date_feats = df_feats[df_feats['dt_parsed'] == row_date]
-                    avg_vol_ratio = df_date_feats['volatility_ratio'].mean() if not df_date_feats.empty else 1.0
-                    
-                    vol_mult = np.clip(avg_vol_ratio, 0.5, 2.0)
-                    raise_step = DYN_RAISE_STEP * vol_mult
-                    lower_step = DYN_LOWER_STEP / vol_mult
-                    
-                    bounds_mult = np.clip(avg_vol_ratio, 0.7, 1.5)
-                    dyn_max_factor = DYN_MAX_FACTOR * bounds_mult
-                    dyn_min_factor = DYN_MIN_FACTOR * bounds_mult
-                    
-                    adjusted_revert_rate = DYN_REVERT_RATE / vol_mult
-                    
-                    if d_name == 'Friday':
-                        current_thr = current_thr * (1 - adjusted_revert_rate) + BASE_THRESHOLD * adjusted_revert_rate
-                        continue
-                        
-                    if 'Toxic Expiry' in str(row.get('reason', '')):
-                        current_thr = current_thr * (1 - adjusted_revert_rate) + BASE_THRESHOLD * adjusted_revert_rate
-                        continue
-                        
-                    if status == 'TRADED':
-                        past_traded_pnls.append(pnl)
-                        emergency_limit = -99999999.0
-                        if len(past_traded_pnls) >= 20:
-                            std_pnl = np.std(past_traded_pnls[-20:])
-                            emergency_limit = -2.5 * std_pnl
-                            emergency_limit = np.clip(emergency_limit, -25000.0, -10000.0)
-                            
-                        if pnl <= emergency_limit:
-                            current_thr = min(current_thr + BASE_THRESHOLD * 1.20, BASE_THRESHOLD * dyn_max_factor)
-                            consec_loss = 0
-                        else:
-                            if pnl < 0:
-                                consec_loss += 1
-                                consec_win = 0
-                            else:
-                                consec_win += 1
-                                consec_loss = 0
-                                
-                            if consec_loss >= DYN_LOSS_DAYS_TRIGGER:
-                                current_thr = min(current_thr + BASE_THRESHOLD * raise_step, BASE_THRESHOLD * dyn_max_factor)
-                                consec_loss = 0
-                            elif consec_win >= DYN_WIN_DAYS_TRIGGER:
-                                current_thr = max(current_thr - BASE_THRESHOLD * lower_step, BASE_THRESHOLD * dyn_min_factor)
-                                consec_win = 0
-                                
-                    current_thr = current_thr * (1 - adjusted_revert_rate) + BASE_THRESHOLD * adjusted_revert_rate
-                    
-                log(f"Calculated Dynamic Threshold for today: Rs {current_thr:,.2f}")
-            except Exception as e:
-                log(f"Warning: Could not compute dynamic threshold from existing logs: {e}. Falling back to default.")
-                current_thr = BASE_THRESHOLD
-        else:
-            log("No daily dynamic threshold log found. Using baseline threshold: Rs 1800.00")
-            current_thr = BASE_THRESHOLD
-
-        # Calculate suspensions from trades history
-        if os.path.exists(trades_ts_path):
-            try:
-                df_trades_ts = pd.read_csv(trades_ts_path)
-                df_trades_ts['parsed_date'] = pd.to_datetime(df_trades_ts['date'])
-                df_trades_ts_past = df_trades_ts[df_trades_ts['parsed_date'] < today_dt].sort_values('parsed_date')
-                
-                # Reconstruct stock suspension states
-                stock_consec_losses = {}
-                stock_cum_pnl = {}
-                stock_suspension_end = {}
-                
-                for _, row in df_trades_ts_past.iterrows():
-                    trade_date = pd.to_datetime(row['date'])
-                    stock = row['stock']
-                    pnl = float(row['actual_pnl'])
-                    
-                    # Update trackers
-                    stock_cum_pnl[stock] = stock_cum_pnl.get(stock, 0.0) + pnl
-                    if pnl < 0:
-                        stock_consec_losses[stock] = stock_consec_losses.get(stock, 0) + 1
-                    else:
-                        stock_consec_losses[stock] = 0
-                        
-                    # Suspend check
-                    if stock_consec_losses[stock] >= 2 or stock_cum_pnl[stock] <= -15000.0:
-                        stock_suspension_end[stock] = trade_date + pd.Timedelta(days=30)
-                        stock_consec_losses[stock] = 0
-                        stock_cum_pnl[stock] = 0.0
-                        
-                # Identify currently suspended stocks today
-                suspended_stocks_today = [stock for stock, end_date in stock_suspension_end.items() if today_dt < end_date]
-                log(f"Suspended stocks today: {suspended_stocks_today}")
-            except Exception as e:
-                log(f"Warning: Could not compute ticker suspensions from logs: {e}.")
-                suspended_stocks_today = []
-        else:
-            suspended_stocks_today = []
-
-        # Step 8: Apply signals and extract recommendations for all 3 strategies
-        # Filter non-duplicated and sort
-        test_candidates = test_scored.drop_duplicates(subset=['stockname']).sort_values('pred_pnl', ascending=False)
+        # Compute bad_expiry from the ensemble frequency window (use full train window)
+        expiry_stats_all = train.groupby('days_to_expiry')['pnl'].mean()
+        bad_expiry_champ = set(expiry_stats_all[expiry_stats_all < FILTER_THRESHOLD].index)
+        is_toxic_expiry = (days_to_expiry in bad_expiry_champ)
         
-        # F&O Banlist Filter Integration:
-        # Load ban list set for today to filter candidates with zero lookahead bias
+        # ── 7B. F&O Banlist ────────────────────────────────────────────────
         ban_path = '/home/ubuntu/banlist/fo_ban_list_historical.csv'
         banned_today = set()
         if os.path.exists(ban_path):
@@ -1317,187 +1194,208 @@ def main():
                 banlist_df = pd.read_csv(ban_path)
                 banlist_df['parsed_date'] = pd.to_datetime(banlist_df['date'], dayfirst=True, format='mixed')
                 banlist_df['stock_upper'] = banlist_df['stock_name'].str.strip().str.upper()
-                
-                # Filter banlist for today
                 banned_today = set(banlist_df[banlist_df['parsed_date'] == today_dt]['stock_upper'])
-                log(f"Loaded F&O Banlist from {ban_path}. Banned stocks today: {banned_today}")
+                log(f"F&O Banlist loaded. Banned today: {banned_today if banned_today else 'None'}")
             except Exception as e_ban:
                 log(f"⚠️ Warning: Could not load F&O Ban list: {e_ban}")
-        else:
-            log(f"⚠️ [WARNING] F&O Ban list file not found at {ban_path}")
-
-        # Filter candidates to only non-banned stocks
+        
+        # ── 7C. Build today's Static Ensemble top 4 from the scored candidates ──
+        test_candidates = test_scored.drop_duplicates(subset=['stockname']).sort_values('pred_pnl', ascending=False)
         if banned_today and not test_candidates.empty:
-            before_ban_count = len(test_candidates)
             test_candidates = test_candidates[~test_candidates['stockname'].str.strip().str.upper().isin(banned_today)].copy()
-            log(f"Filtered out F&O Banned stocks today: removed {before_ban_count - len(test_candidates)} candidates. Remaining: {len(test_candidates)}")
-            
-        # ─────────────────────────────────────────────────────────────────────
-        # STRATEGY 1: STATIC BASELINE (THRESHOLD = 1800)
-        # ─────────────────────────────────────────────────────────────────────
-        picks_baseline = []
-        if not is_friday_lock and not is_toxic_expiry:
-            picks_baseline = test_candidates[test_candidates['pred_pnl'] > BASE_THRESHOLD].head(MAX_TRADES_PER_DAY)
-            
-        # ─────────────────────────────────────────────────────────────────────
-        # STRATEGY 2: DYNAMIC THRESHOLD (THRESHOLD = current_thr)
-        # ─────────────────────────────────────────────────────────────────────
-        picks_dynamic = []
-        if not is_friday_lock and not is_toxic_expiry:
-            picks_dynamic = test_candidates[test_candidates['pred_pnl'] > current_thr].head(MAX_TRADES_PER_DAY)
-            
-        # ─────────────────────────────────────────────────────────────────────
-        # STRATEGY 3: TICKER SUSPENSION (THRESHOLD = 1800 + SUSPENSIONS)
-        # ─────────────────────────────────────────────────────────────────────
-        picks_suspension = []
-        if not is_friday_lock and not is_toxic_expiry:
-            non_suspended_candidates = test_candidates[~test_candidates['stockname'].isin(suspended_stocks_today)]
-            picks_suspension = non_suspended_candidates[non_suspended_candidates['pred_pnl'] > BASE_THRESHOLD].head(MAX_TRADES_PER_DAY)
-            
-        # ─────────────────────────────────────────────────────────────────────
-        # STRATEGY 4: GOLDEN WEEKDAY COMBO (BYPASS THRESHOLD + 2.0X SIZING)
-        # ─────────────────────────────────────────────────────────────────────
-        picks_golden_combo = []
-        if not is_friday_lock and not is_toxic_expiry:
-            allocated_units = 0.0
-            max_units = 4.0
-            sector_counts = {}
-            for _, r in test_candidates.iterrows():
-                ticker = r['stockname']
-                sector = get_stock_sector(ticker)
-                
-                # Enforce sector concentration limit (maximum 1 trade per sector)
-                current_sec_count = sector_counts.get(sector, 0)
-                if current_sec_count >= DYN_SECTOR_CAP:
-                    continue
-                    
-                # Check if it passes standard threshold OR is golden bypass setup (Fully Volatility-Adjusted)
-                is_gold_setup = (r['success_pct'] >= 75.0) & (r['avg_pnl'] >= r['std_pnl'] * 0.40) & (r['hist_count'] >= 15)
-                is_golden_bypass = is_gold_setup & (r['pred_pnl'] >= r['std_pnl'] * 0.32)
-                
-                if (r['pred_pnl'] > current_thr) or is_golden_bypass:
-                    qty = 2.0 if is_gold_setup else 1.0
-                    if allocated_units + qty <= max_units:
-                        picks_golden_combo.append((r, qty))
-                        allocated_units += qty
-                        sector_counts[sector] = current_sec_count + 1
-                    elif allocated_units + 1.0 <= max_units:
-                        picks_golden_combo.append((r, 1.0))
-                        allocated_units += 1.0
-                        sector_counts[sector] = current_sec_count + 1
-                    if allocated_units >= max_units:
+        
+        # Static Ensemble top 4 (the solid foundation)
+        static_top4 = test_candidates.head(MAX_TRADES_PER_DAY) if not is_friday_lock and not is_toxic_expiry else pd.DataFrame()
+        static_top_stocks = static_top4['stockname'].tolist() if not static_top4.empty else []
+        
+        # ── 7D. ML Regime Selector — Ridge Regression on frequency PnL history ──
+        # Load historical frequency CSVs from the historical_models output folder
+        hist_output_dir = os.path.join(_THIS_DIR, 'historical_models', 'output')
+        freqs = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly']
+        freq_hist_dfs = {}
+        ml_available = True
+        for freq in freqs:
+            p = os.path.join(hist_output_dir, f'trades_dynamic_threshold_{freq}.csv')
+            if os.path.exists(p):
+                df_freq = pd.read_csv(p)
+                df_freq['date'] = pd.to_datetime(df_freq['date'])
+                freq_hist_dfs[freq] = df_freq
+            else:
+                log(f"⚠️ Historical CSV missing: {p}. ML Regime Selector will be skipped.")
+                ml_available = False
+                break
+
+        ml_stocks = set()
+        dampener_active = False
+        champion_stock = None
+        ml_mode_label = "STATIC ENSEMBLE (ML data unavailable)"
+
+        if ml_available:
+            # Build daily PnL series per frequency
+            all_hist_dates = set()
+            for df_freq in freq_hist_dfs.values():
+                all_hist_dates.update(df_freq['date'].unique())
+            all_hist_dates = sorted(list(all_hist_dates))
+
+            daily_pnl_hist = {freq: pd.Series(0.0, index=all_hist_dates) for freq in freqs}
+            for freq, df_freq in freq_hist_dfs.items():
+                dp = df_freq.groupby('date')['actual_pnl'].sum()
+                daily_pnl_hist[freq].update(dp)
+
+            df_pnl_hist = pd.DataFrame(daily_pnl_hist)
+            df_pnl_hist['date'] = df_pnl_hist.index
+            df_pnl_hist = df_pnl_hist.reset_index(drop=True)
+
+            # Rolling PnL features (no lookahead — shifted by 1)
+            pnl_feats = pd.DataFrame({'date': df_pnl_hist['date']})
+            for freq in freqs:
+                for window in [3, 7, 14, 30]:
+                    pnl_feats[f'{freq}_sum_{window}'] = df_pnl_hist[freq].rolling(window).sum().shift(1)
+                    pnl_feats[f'{freq}_mean_{window}'] = df_pnl_hist[freq].rolling(window).mean().shift(1)
+
+            # Market-level features from f11
+            f11_path_ml = os.path.join(DATA_DIR, 'f11_intraday_features_all.csv')
+            df_f11_ml = pd.read_csv(f11_path_ml)
+            df_f11_ml['Date'] = pd.to_datetime(df_f11_ml['Date'], format='mixed', dayfirst=True)
+            mkt_feats = df_f11_ml.groupby('Date').agg(
+                market_volatility=('intraday_volatility', 'mean') if 'intraday_volatility' in df_f11_ml.columns else ('intraday_return', 'std'),
+                market_return=('intraday_return', 'mean'),
+                market_trend=('intraday_rsi_9', 'mean'),
+                market_adv_dec=('intraday_return', lambda x: (x > 0).mean()),
+                market_macd=('intraday_macd', 'mean') if 'intraday_macd' in df_f11_ml.columns else ('intraday_return', 'mean'),
+            ).reset_index().rename(columns={'Date': 'date'})
+
+            df_master_ml = pd.merge(df_pnl_hist, pnl_feats, on='date', how='inner')
+            df_master_ml = pd.merge(df_master_ml, mkt_feats, on='date', how='inner')
+            df_master_ml = df_master_ml.dropna().reset_index(drop=True)
+
+            ml_feature_cols = [c for c in df_master_ml.columns if c not in ['date'] + freqs]
+
+            # Only train ML if we have enough history (>= 100 rows before today)
+            train_ml = df_master_ml[df_master_ml['date'] < today_dt]
+            test_ml_row = df_master_ml[df_master_ml['date'] == today_dt]
+
+            if len(train_ml) >= 100 and not test_ml_row.empty:
+                X_tr = train_ml[ml_feature_cols].values
+                X_te = test_ml_row[ml_feature_cols].values
+
+                scaler_ml = StandardScaler()
+                X_tr_sc = scaler_ml.fit_transform(X_tr)
+                X_te_sc = scaler_ml.transform(X_te)
+
+                freq_score = {}
+                for freq in freqs:
+                    y_tr = train_ml[freq].values
+                    mdl = Ridge(alpha=1.0, random_state=42)
+                    mdl.fit(X_tr_sc, y_tr)
+                    freq_score[freq] = mdl.predict(X_te_sc)[0]
+
+                top2_freqs = sorted(freq_score, key=freq_score.get, reverse=True)[:2]
+                log(f"ML Regime Selector → Top 2 frequencies today: {top2_freqs} (scores: {[(f, round(freq_score[f], 0)) for f in top2_freqs]})")
+
+                for freq in top2_freqs:
+                    df_freq_today = freq_hist_dfs[freq][freq_hist_dfs[freq]['date'] == today_dt]
+                    ml_stocks.update(df_freq_today['stock'].unique())
+
+                # ── 7E. Adaptive Weekly Dampener ───────────────────────────
+                # Uses our OWN past completed ISO week performance from historical trades
+                ens_hist_path = os.path.join(hist_output_dir, 'trades_dynamic_threshold_ensemble.csv')
+                if os.path.exists(ens_hist_path):
+                    df_ens_hist = pd.read_csv(ens_hist_path)
+                    df_ens_hist['date'] = pd.to_datetime(df_ens_hist['date'])
+                    df_ens_past = df_ens_hist[df_ens_hist['date'] < today_dt].copy()
+                    if not df_ens_past.empty:
+                        df_ens_past['iso_year'] = df_ens_past['date'].dt.isocalendar().year
+                        df_ens_past['iso_week'] = df_ens_past['date'].dt.isocalendar().week
+                        today_iso = today_dt.isocalendar()
+                        curr_yr, curr_wk = today_iso[0], today_iso[1]
+                        completed = df_ens_past[~((df_ens_past['iso_year'] == curr_yr) & (df_ens_past['iso_week'] == curr_wk))]
+                        if not completed.empty:
+                            weekly_pnl = completed.groupby(['iso_year', 'iso_week'])['actual_pnl'].sum()
+                            last_week_pnl = weekly_pnl.iloc[-1]
+                            if last_week_pnl < 0:
+                                dampener_active = True
+                                log(f"⚠️ DAMPENER ACTIVE: Last completed week PnL = Rs {last_week_pnl:,.0f} (negative). Reverting to Standard Static Ensemble for safety.")
+                            else:
+                                log(f"✅ DAMPENER OFF: Last completed week PnL = Rs {last_week_pnl:,.0f} (positive). Full ML Dual Confirmation mode ACTIVE.")
+
+                ml_mode_label = "DAMPENER MODE (Standard Static)" if dampener_active else "ML DUAL CONFIRMATION MODE"
+            else:
+                log(f"⚠️ Insufficient ML training history ({len(train_ml)} rows). Falling back to Standard Static Ensemble.")
+                ml_mode_label = "STATIC ENSEMBLE (ML warmup)"
+
+        # ── 7F. Build Champion Final Picks ────────────────────────────────
+        champion_picks = []  # list of (row, lots)
+        
+        if is_friday_lock or is_toxic_expiry:
+            pass  # No trades
+        elif static_top_stocks:
+            if dampener_active or not ml_available or not ml_stocks:
+                # Standard 1-lot each from Static Ensemble top 4
+                for _, r in static_top4.iterrows():
+                    champion_picks.append((r, 1))
+            else:
+                # ML Dual Confirmation: find first stock in static top 3 that's also in ML pool
+                for s in static_top_stocks[:3]:
+                    if s in ml_stocks:
+                        champion_stock = s
                         break
 
-            
-        # Print Beautiful Summary Report
-        print("\n" + "="*90)
-        print(f"                        SNIPER ALGORITHM PRODUCTION TRADING CANDIDATES")
-        print(f"                       TARGET DATE: {today_dt.strftime('%A, %Y-%m-%d')} ({today_str})")
-        print("="*90)
-        print(f"Market Status      : {'FRIDAY LOCK (NO TRADES)' if is_friday_lock else 'ACTIVE'}")
-        print(f"Expiry Safety Lock : {'TOXIC EXPIRY (NO TRADES - DTE: ' + str(days_to_expiry) + ')' if is_toxic_expiry else 'PASSED (DTE: ' + str(days_to_expiry) + ')'}")
-        print(f"Dynamic Threshold  : Rs {current_thr:,.2f}  (Base: Rs {BASE_THRESHOLD:,.2f})")
-        print(f"Suspended Stocks   : {len(suspended_stocks_today)} stocks suspended ({', '.join(suspended_stocks_today) if suspended_stocks_today else 'None'})")
-        print("-" * 90)
-        print(f"{'Stock Name':<12} | {'Score':<5} | {'Band':<8} | {'Pred PnL':<10} | {'Gap %':<8} | {'RSI (9)':<8} | {'Intraday Ret %':<14}")
-        print("-" * 90)
-        
-        for _, row in test_candidates.head(15).iterrows():
-            stock = row['stockname']
-            score = row['score']
-            band = row['band']
-            pred_pnl = row['pred_pnl']
-            gap_pct = row['Gap_Pct']
-            rsi = row['intraday_rsi_9']
-            int_ret = row['intraday_return']
-            
-            # Format display
-            print(f"{stock:<12} | {score:>5.1f} | {band:<8} | Rs {pred_pnl:>7.0f} | {gap_pct:>7.2f}% | {rsi:>7.1f} | {int_ret:>13.2f}%")
-        print("-" * 90)
-        
-        # Print suggestions for each model
-        print("\n" + "="*40 + " FINAL STRATEGY RECOMMENDATIONS " + "="*40)
-        
-        # 1. Static Baseline Picks
-        print(f"\n1. STATIC BASELINE PICKS (Threshold: Rs {BASE_THRESHOLD:,.0f}):")
-        if picks_baseline.empty if hasattr(picks_baseline, 'empty') else len(picks_baseline) == 0:
-            if is_friday_lock:
-                print("  -> [NO TRADES] Friday Lock is ACTIVE (no trades are generated on Fridays to avoid weekend gap risk).")
-            elif is_toxic_expiry:
-                print(f"  -> [NO TRADES] Toxic Expiry Safety Lock is ACTIVE (Days to Expiry: {days_to_expiry} is flagged as high-risk).")
-            elif test_candidates.empty:
-                print("  -> [NO TRADES] No stock candidates were available for scoring.")
-            else:
-                top_stock = test_candidates.iloc[0]['stockname']
-                top_pnl = test_candidates.iloc[0]['pred_pnl']
-                print(f"  -> [NO TRADES] All candidates fell below the Rs {BASE_THRESHOLD:,.0f} threshold. (Highest candidate: {top_stock} predicted Rs {top_pnl:,.0f}).")
-        else:
-            for idx, (_, r) in enumerate(picks_baseline.iterrows(), 1):
-                print(f"  [{idx}] {r['stockname']:<12} | Score: {r['score']:>5.1f} ({r['band']}) | Predicted PnL: Rs {r['pred_pnl']:,.0f}")
-                
-        # 2. Dynamic Threshold Picks
-        print(f"\n2. DYNAMIC THRESHOLD PICKS (Threshold: Rs {current_thr:,.0f}):")
-        if picks_dynamic.empty if hasattr(picks_dynamic, 'empty') else len(picks_dynamic) == 0:
-            if is_friday_lock:
-                print("  -> [NO TRADES] Friday Lock is ACTIVE (no trades are generated on Fridays to avoid weekend gap risk).")
-            elif is_toxic_expiry:
-                print(f"  -> [NO TRADES] Toxic Expiry Safety Lock is ACTIVE (Days to Expiry: {days_to_expiry} is flagged as high-risk).")
-            elif test_candidates.empty:
-                print("  -> [NO TRADES] No stock candidates were available for scoring.")
-            else:
-                top_stock = test_candidates.iloc[0]['stockname']
-                top_pnl = test_candidates.iloc[0]['pred_pnl']
-                print(f"  -> [NO TRADES] All candidates fell below the dynamic Rs {current_thr:,.0f} threshold. (Highest candidate: {top_stock} predicted Rs {top_pnl:,.0f}).")
-        else:
-            for idx, (_, r) in enumerate(picks_dynamic.iterrows(), 1):
-                print(f"  [{idx}] {r['stockname']:<12} | Score: {r['score']:>5.1f} ({r['band']}) | Predicted PnL: Rs {r['pred_pnl']:,.0f}")
-                
-        # 3. Ticker Suspension Picks
-        print(f"\n3. TICKER SUSPENSION PICKS (Threshold: Rs {BASE_THRESHOLD:,.0f} + Suspensions):")
-        if picks_suspension.empty if hasattr(picks_suspension, 'empty') else len(picks_suspension) == 0:
-            if is_friday_lock:
-                print("  -> [NO TRADES] Friday Lock is ACTIVE (no trades are generated on Fridays to avoid weekend gap risk).")
-            elif is_toxic_expiry:
-                print(f"  -> [NO TRADES] Toxic Expiry Safety Lock is ACTIVE (Days to Expiry: {days_to_expiry} is flagged as high-risk).")
-            elif test_candidates.empty:
-                print("  -> [NO TRADES] No stock candidates were available for scoring.")
-            elif len(suspended_stocks_today) > 0 and all(s in suspended_stocks_today for s in test_candidates.head(4)['stockname']):
-                print(f"  -> [NO TRADES] Top high-scoring candidates were filtered out due to active ticker suspensions: {suspended_stocks_today}.")
-            else:
-                non_suspended_candidates = test_candidates[~test_candidates['stockname'].isin(suspended_stocks_today)]
-                if non_suspended_candidates.empty:
-                     print("  -> [NO TRADES] All scored candidates are currently suspended.")
+                if champion_stock and len(static_top_stocks) >= 4:
+                    for _, r in static_top4.iterrows():
+                        stock = r['stockname']
+                        if stock == champion_stock:
+                            champion_picks.append((r, 2))   # 2x LOTS — Dual Confirmed Champion
+                        elif stock != static_top_stocks[3]:  # drop the 4th stock
+                            champion_picks.append((r, 1))
+                    log(f"🔥 DUAL CONFIRMED CHAMPION: {champion_stock} → 2x LOTS")
                 else:
-                     top_stock = non_suspended_candidates.iloc[0]['stockname']
-                     top_pnl = non_suspended_candidates.iloc[0]['pred_pnl']
-                     print(f"  -> [NO TRADES] All non-suspended candidates fell below the Rs {BASE_THRESHOLD:,.0f} threshold. (Highest non-suspended: {top_stock} predicted Rs {top_pnl:,.0f}).")
+                    # No dual confirmation found — standard 1-lot each
+                    for _, r in static_top4.iterrows():
+                        champion_picks.append((r, 1))
+                    log("No dual confirmation found. Trading standard Static Ensemble 1x each.")
+
+        # ── 7G. Print Final Output ────────────────────────────────────────
+        print("\n" + "="*90)
+        print(f"              🏆 CHAMPION STRATEGY — TODAY'S TRADING RECOMMENDATIONS 🏆")
+        print(f"                  TARGET DATE: {today_dt.strftime('%A, %Y-%m-%d')}")
+        print("="*90)
+        print(f"Mode               : {ml_mode_label}")
+        print(f"Market Status      : {'⛔ FRIDAY LOCK (NO TRADES)' if is_friday_lock else '✅ ACTIVE'}")
+        print(f"Expiry Safety Lock : {'⛔ TOXIC EXPIRY (NO TRADES, DTE: ' + str(days_to_expiry) + ')' if is_toxic_expiry else '✅ PASSED (DTE: ' + str(days_to_expiry) + ')'}")
+        print(f"Dampener Status    : {'🛡️ ACTIVE (protective mode)' if dampener_active else '🚀 OFF (full ML mode)'}")
+        print(f"ML Stocks Pool     : {sorted(ml_stocks) if ml_stocks else 'N/A'}")
+        print(f"Dual Confirmed     : {champion_stock if champion_stock else 'None'}")
+        print("-"*90)
+        print(f"{'#':<3} | {'STOCK':<12} | {'LOTS':<6} | {'SCORE':<6} | {'BAND':<8} | {'PRED PnL':<10} | {'NOTE'}")
+        print("-"*90)
+
+        if is_friday_lock:
+            print("   → [NO TRADES] Friday Lock is ACTIVE (no trades on Fridays)")
+        elif is_toxic_expiry:
+            print(f"   → [NO TRADES] Toxic Expiry Lock ACTIVE (DTE: {days_to_expiry} is high-risk)")
+        elif not champion_picks:
+            print("   → [NO TRADES] No stock candidates qualified today")
         else:
-            for idx, (_, r) in enumerate(picks_suspension.iterrows(), 1):
-                print(f"  [{idx}] {r['stockname']:<12} | Score: {r['score']:>5.1f} ({r['band']}) | Predicted PnL: Rs {r['pred_pnl']:,.0f}")
-                
-        # 4. Golden Weekday Combo Picks
-        print(f"\n4. GOLDEN WEEKDAY COMBO PICKS (Bypass Threshold + 2.0x Double Lot Allocation):")
-        if len(picks_golden_combo) == 0:
-            if is_friday_lock:
-                print("  -> [NO TRADES] Friday Lock is ACTIVE.")
-            elif is_toxic_expiry:
-                print(f"  -> [NO TRADES] Toxic Expiry Safety Lock is ACTIVE (DTE: {days_to_expiry}).")
-            else:
-                print("  -> [NO TRADES] No candidates qualified.")
-        else:
-            for idx, (r, qty) in enumerate(picks_golden_combo, 1):
-                size_label = "2.0x (DOUBLE LOT)" if qty == 2.0 else "1.0x (STANDARD)"
-                print(f"  [{idx}] {r['stockname']:<12} | Allocation Size: {size_label} | Pred PnL: Rs {r['pred_pnl']:,.0f} | Success WR: {r['success_pct']:.1f}%")
+            for idx, (r, qty) in enumerate(champion_picks, 1):
+                lot_label = "2x ⭐ CHAMPION" if qty == 2 else "1x Standard"
+                print(f"{idx:<3} | {r['stockname']:<12} | {lot_label:<14} | {r['score']:>5.1f} | {r['band']:<8} | Rs {r['pred_pnl']:>7.0f}  | {'← Dual Confirmed ML' if r['stockname'] == champion_stock else ''}")
+
+        print("="*90)
+        print(f"\n📊 Top 10 Candidates (for reference):")
+        print(f"{'#':<3} | {'STOCK':<12} | {'SCORE':<6} | {'BAND':<8} | {'PRED PnL':<10}")
+        print("-"*55)
+        for idx, (_, row) in enumerate(test_candidates.head(10).iterrows(), 1):
+            print(f"{idx:<3} | {row['stockname']:<12} | {row['score']:>5.1f} | {row['band']:<8} | Rs {row['pred_pnl']:>7.0f}")
         print("="*90 + "\n")
-        
-        # Step 8.5: Write predictions to predictedstocksfortoday.csv
+
+        # ── 7H. Write predictions to predictedstocksfortoday.csv ─────────
         try:
             import csv
             predicted_stocks_path = os.path.join(_THIS_DIR, 'output', 'predictedstocksfortoday.csv')
             os.makedirs(os.path.dirname(predicted_stocks_path), exist_ok=True)
             date_str = today_dt.strftime("%Y%m%d")
-            
-            # Read existing records to prevent duplication upon re-runs
+
             existing_records = []
             if os.path.exists(predicted_stocks_path):
                 with open(predicted_stocks_path, 'r', newline='') as f_read:
@@ -1505,79 +1403,75 @@ def main():
                     for row in reader:
                         if row and row[0] != date_str:
                             existing_records.append(row)
-            
+
             records_to_append = []
-            if picks_golden_combo:
-                for r, qty in picks_golden_combo:
-                    records_to_append.append([date_str, r['stockname']])
-            
-            # Rewrite clean historical records and append new ones
+            for r, qty in champion_picks:
+                records_to_append.append([date_str, r['stockname'], qty])
+
             with open(predicted_stocks_path, 'w', newline='') as f_write:
                 writer = csv.writer(f_write)
                 if existing_records:
                     writer.writerows(existing_records)
                 if records_to_append:
                     writer.writerows(records_to_append)
-                    
+
             if records_to_append:
-                print(f"✔ Successfully updated {predicted_stocks_path}: wrote {len(records_to_append)} Golden Weekday Combo predictions for {date_str} cleanly (de-duplicated).")
-            else:
-                print(f"ℹ No predictions to write to predictedstocksfortoday.csv for {date_str} (Golden Weekday Combo picks are empty).")
+                log(f"✔ Wrote {len(records_to_append)} Champion picks to predictedstocksfortoday.csv for {date_str}")
         except Exception as csv_err:
-            print(f"⚠️ Warning: Failed to write/append predictions to predictedstocksfortoday.csv: {csv_err}")
-            
-        # Send Telegram Message
+            log(f"⚠️ Warning: Failed to write predictions CSV: {csv_err}")
+
+        # ── 7I. Telegram Alert ────────────────────────────────────────────
         import subprocess
-        
-        # Build Telegram Message String
         tg_lines = []
-        tg_lines.append("🎯 <b>DYNAMIC THRESHOLD SYSTEM</b> 🎯")
+        tg_lines.append("🏆 <b>CHAMPION STRATEGY PREDICTIONS</b> 🏆")
         tg_lines.append(f"📅 <b>Date</b>: {today_dt.strftime('%A, %Y-%m-%d')}")
-        tg_lines.append(f"🚪 <b>Market Status</b>: {'FRIDAY LOCK' if is_friday_lock else 'ACTIVE'}")
-        tg_lines.append(f"🔒 <b>Expiry Lock</b>: {'TOXIC EXPIRY (DTE: ' + str(days_to_expiry) + ')' if is_toxic_expiry else 'PASSED (DTE: ' + str(days_to_expiry) + ')'}")
-        tg_lines.append(f"📈 <b>Dynamic Threshold</b>: Rs {current_thr:,.2f}")
-        tg_lines.append(f"🚫 <b>Suspensions</b>: {', '.join(suspended_stocks_today) if suspended_stocks_today else 'None'}")
+        tg_lines.append(f"⚙️ <b>Mode</b>: {ml_mode_label}")
+        tg_lines.append(f"🛡️ <b>Dampener</b>: {'ACTIVE (protective)' if dampener_active else 'OFF (full ML)'}")
+        tg_lines.append(f"🚪 <b>Market</b>: {'FRIDAY LOCK' if is_friday_lock else 'ACTIVE'}")
+        tg_lines.append(f"🔒 <b>Expiry Lock</b>: {'TOXIC (DTE: ' + str(days_to_expiry) + ')' if is_toxic_expiry else 'PASSED (DTE: ' + str(days_to_expiry) + ')'}")
         tg_lines.append("")
-        tg_lines.append("🏆 <b>RECOMMENDATIONS</b>")
-        
-        # 1. Golden Weekday Combo Recommendations (Catch-eye First)
-        if len(picks_golden_combo) == 0:
-            reason_golden = " (Friday Lock is Active)" if is_friday_lock else \
-                             f" (Toxic Expiry Lock, DTE: {days_to_expiry})" if is_toxic_expiry else \
-                             " (No candidates qualified)"
-            tg_lines.append(f"• [NO TRADES]{reason_golden}")
+        tg_lines.append("🎯 <b>FINAL RECOMMENDATIONS:</b>")
+
+        if is_friday_lock:
+            tg_lines.append("• [NO TRADES] Friday Lock Active")
+        elif is_toxic_expiry:
+            tg_lines.append(f"• [NO TRADES] Toxic Expiry Lock (DTE: {days_to_expiry})")
+        elif not champion_picks:
+            tg_lines.append("• [NO TRADES] No candidates qualified")
         else:
-            for idx, (r, qty) in enumerate(picks_golden_combo, 1):
-                size_label = "2.0x (DOUBLE LOT)" if qty == 2.0 else "1.0x (STANDARD)"
-                tg_lines.append(f"{idx}. 🔥 <b>{r['stockname']}</b> - {size_label} (Rs {r['pred_pnl']:,.0f})")
-                
+            for idx, (r, qty) in enumerate(champion_picks, 1):
+                lot_label = "2x ⭐ CHAMPION" if qty == 2 else "1x"
+                tg_lines.append(f"{idx}. <b>{r['stockname']}</b> — {lot_label} (Rs {r['pred_pnl']:,.0f})")
+
+        if ml_stocks and not dampener_active:
+            tg_lines.append("")
+            tg_lines.append(f"🤖 <b>ML Pool</b>: {', '.join(sorted(ml_stocks)[:8])}")
+
         tg_lines.append("")
         tg_lines.append("💡 <b>Top Candidates:</b>")
-        if not test_candidates.empty:
-            for idx, (_, row) in enumerate(test_candidates.head(5).iterrows(), 1):
-                tg_lines.append(f"{idx}. {row['stockname']} (Rs {row['pred_pnl']:,.0f})")
-        else:
-            tg_lines.append("No candidates available.")
-            
+        for idx, (_, row) in enumerate(test_candidates.head(5).iterrows(), 1):
+            tg_lines.append(f"{idx}. {row['stockname']} (Rs {row['pred_pnl']:,.0f})")
+
         tg_msg = "\n".join(tg_lines)
-        
+
         try:
             bot_path = "/home/ubuntu/telegram_bot/New_OrderInfoBot.js"
             if os.path.exists(bot_path):
                 subprocess.run(["node", bot_path, tg_msg], check=True, timeout=15)
-                print("[predict_today] Telegram alert sent successfully via OrderInfoBot.")
+                log("Telegram alert sent successfully via Champion Strategy.")
             else:
-                print(f"[predict_today] Warning: OrderInfoBot not found at {bot_path}")
+                log(f"Warning: OrderInfoBot not found at {bot_path}")
         except Exception as tg_err:
-            print(f"[predict_today] Warning: Failed to send Telegram alert: {tg_err}")
+            log(f"Warning: Failed to send Telegram alert: {tg_err}")
 
-        
     finally:
         # Step 9: Cleanup and restore the original PnL sheet
         if os.path.exists(BACKUP_PNL_CSV):
             log("Restoring original PnL sheet to keep files clean and uncontaminated...")
             os.replace(BACKUP_PNL_CSV, PNL_CSV)
             log("Original PnL CSV restored successfully.")
-            
+
+
 if __name__ == '__main__':
     main()
+
