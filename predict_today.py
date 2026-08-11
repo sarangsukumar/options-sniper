@@ -1341,14 +1341,21 @@ def main():
                         champion_stock = s
                         break
 
-                if champion_stock and len(static_top_stocks) >= 4:
+                if champion_stock and len(static_top_stocks) >= 2:
+                    # Find the lowest-ranked stock that is NOT the champion to drop
+                    stock_to_drop = None
+                    for s in reversed(static_top_stocks):
+                        if s != champion_stock:
+                            stock_to_drop = s
+                            break
+                            
                     for _, r in static_top4.iterrows():
                         stock = r['stockname']
                         if stock == champion_stock:
                             champion_picks.append((r, 2))   # 2x LOTS — Dual Confirmed Champion
-                        elif stock != static_top_stocks[3]:  # drop the 4th stock
+                        elif stock != stock_to_drop:  
                             champion_picks.append((r, 1))
-                    log(f"🔥 DUAL CONFIRMED CHAMPION: {champion_stock} → 2x LOTS")
+                    log(f"🔥 DUAL CONFIRMED CHAMPION: {champion_stock} → 2x LOTS (Dropped {stock_to_drop} to maintain max units)")
                 else:
                     # No dual confirmation found — standard 1-lot each
                     for _, r in static_top4.iterrows():
