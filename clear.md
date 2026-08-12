@@ -41,3 +41,23 @@ If you want to automate this, run a script that does:
 2. Load Today's Output
 3. Append Today's rows where `date > max(CLEAN_REFERENCE['date'])`
 4. Save over `CLEAN_REFERENCE` and `trades_dynamic_threshold.csv`
+
+---
+
+### ⚠️ HOW TO REBUILD HISTORICAL RESULTS FROM SCRATCH
+If a researcher or team member explicitly needs to re-run the entire 7.5-year historical simulation from scratch (for R&D or to regenerate the cache files), follow these steps:
+
+**Warning:** Due to the database purge on Aug 5, 2026, a fresh rebuild will look slightly different than the `CLEAN_REFERENCE` baseline. It is recommended for R&D purposes only, NOT for overwriting production tracking.
+
+**Step 1: Regenerate Base ML Caches**
+```bash
+cd historical_models/
+python3 ensemble_model.py
+```
+*(This rebuilds the raw `.pkl` prediction scores for all F&O stocks across history. Ensure `REMOVE_EXTREME_TRAINING_LOSSES = False` inside the script before running).*
+
+**Step 2: Run the Dynamic Threshold Walk-Forward**
+```bash
+python3 dynamic_threshold.py
+```
+*(This processes the raw `.pkl` cache through the threshold logic, generating a new `output/trades_dynamic_threshold.csv` that evaluates the model's historical edge).*
