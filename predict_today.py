@@ -44,7 +44,7 @@ DYN_MIN_FACTOR         = 0.60
 DYN_MAX_FACTOR         = 2.00
 DYN_REVERT_RATE        = 0.08
 BASE_THRESHOLD         = 1800.0
-MAX_TRADES_PER_DAY     = 4
+MAX_TRADES_PER_DAY     = 2
 
 # SECTOR CONCENTRATION CAPPING
 DYN_SECTOR_CAP         = 9999
@@ -1426,6 +1426,37 @@ def main():
                 log(f"✔ Wrote {len(records_to_append)} Champion picks to predictedstocksfortoday.csv for {date_str}")
         except Exception as csv_err:
             log(f"⚠️ Warning: Failed to write predictions CSV: {csv_err}")
+
+        # ── 7H2. Insert into markets.orders table ─────────────────────────
+        try:
+            import pymysql
+            import random
+            
+            conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
+            cursor = conn.cursor()
+            
+            sim_time = today_dt.strftime('%Y-%m-%d 00:00:00')
+            cre_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            for idx, (r, qty) in enumerate(champion_picks, 1):
+                stock = r['stockname']
+                price = 0.0
+                order_rank = f"TL_{idx}"
+                
+                sql = """
+                    INSERT INTO orders (stockname, price, quantity, type, ismarket, stoplossprice, 
+                                        limitprice, limitprice_original, simulationtime, cretime, modtime, 
+                                        credate, isvalid, is_future, USER, order_rank)
+                    VALUES (%s, %s, %s, 'BUY', 0, NULL, %s, %s, %s, %s, %s, NULL, 'FALSE', 'TL', 'MANISHA', %s)
+                """
+                cursor.execute(sql, (stock, price, qty, price, price, sim_time, cre_time, cre_time, order_rank))
+                
+            conn.commit()
+            cursor.close()
+            conn.close()
+            log(f"✔ Successfully inserted {len(champion_picks)} Champion picks into markets.orders table.")
+        except Exception as db_err:
+            log(f"⚠️ Warning: Failed to insert into markets.orders: {db_err}")
 
         # ── 7I. Telegram Alert ────────────────────────────────────────────
         import subprocess
