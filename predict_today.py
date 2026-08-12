@@ -680,12 +680,12 @@ def predict_for_frequency(freq, train, test, today_dt, feats_t1, feats_t2, feats
     expiry_stats = train_window.groupby('days_to_expiry')['pnl'].mean()
     bad_expiry = set(expiry_stats[expiry_stats < FILTER_THRESHOLD].index)
     
-    # Apply Static -10% Outlier Filter on training data
-    if 'buy_price' in train_window.columns and 'sell_price' in train_window.columns:
-        train_window = train_window[
-            (train_window['buy_price'] > 0) & 
-            (((train_window['sell_price'] - train_window['buy_price']) / train_window['buy_price']) >= -0.10)
-        ].copy()
+    # NO NOISE FILTER: We no longer apply the -10% Outlier Filter to strictly match original clean data
+    # if 'buy_price' in train_window.columns and 'sell_price' in train_window.columns:
+    #     train_window = train_window[
+    #         (train_window['buy_price'] > 0) & 
+    #         (((train_window['sell_price'] - train_window['buy_price']) / train_window['buy_price']) >= -0.10)
+    #     ].copy()
         
     # Target Encode Seasonality
     month_day_stats = train_window.groupby('month_day_key').agg(
@@ -1204,8 +1204,14 @@ def main():
         if banned_today and not test_candidates.empty:
             test_candidates = test_candidates[~test_candidates['stockname'].str.strip().str.upper().isin(banned_today)].copy()
         
-        # Static Ensemble top 4 (the solid foundation)
-        static_top4 = test_candidates.head(MAX_TRADES_PER_DAY) if not is_friday_lock and not is_toxic_expiry else pd.DataFrame()
+        # Static Ensemble - Explicitly picking R1 and R3 (indices 0 and 2) based on historical maximin PnL optimization
+        if not is_friday_lock and not is_toxic_expiry and len(test_candidates) > 0:
+            if len(test_candidates) >= 3:
+                static_top4 = test_candidates.iloc[[0, 2]].copy()
+            else:
+                static_top4 = test_candidates.iloc[[0]].copy()
+        else:
+            static_top4 = pd.DataFrame()
         static_top_stocks = static_top4['stockname'].tolist() if not static_top4.empty else []
         
         # ── 7D. ML Regime Selector — Ridge Regression on frequency PnL history ──
@@ -1330,37 +1336,10 @@ def main():
         if is_friday_lock or is_toxic_expiry:
             pass  # No trades
         elif static_top_stocks:
-            if dampener_active or not ml_available or not ml_stocks:
-                # Standard 1-lot each from Static Ensemble top 4
-                for _, r in static_top4.iterrows():
-                    champion_picks.append((r, 1))
-            else:
-                # ML Dual Confirmation: find first stock in static top 3 that's also in ML pool
-                for s in static_top_stocks[:3]:
-                    if s in ml_stocks:
-                        champion_stock = s
-                        break
-
-                if champion_stock and len(static_top_stocks) >= 2:
-                    # Find the lowest-ranked stock that is NOT the champion to drop
-                    stock_to_drop = None
-                    for s in reversed(static_top_stocks):
-                        if s != champion_stock:
-                            stock_to_drop = s
-                            break
-                            
-                    for _, r in static_top4.iterrows():
-                        stock = r['stockname']
-                        if stock == champion_stock:
-                            champion_picks.append((r, 2))   # 2x LOTS — Dual Confirmed Champion
-                        elif stock != stock_to_drop:  
-                            champion_picks.append((r, 1))
-                    log(f"🔥 DUAL CONFIRMED CHAMPION: {champion_stock} → 2x LOTS (Dropped {stock_to_drop} to maintain max units)")
-                else:
-                    # No dual confirmation found — standard 1-lot each
-                    for _, r in static_top4.iterrows():
-                        champion_picks.append((r, 1))
-                    log("No dual confirmation found. Trading standard Static Ensemble 1x each.")
+            # FORCE R1 + R3 at 1x LOT EACH (Safest Configuration)
+            for _, r in static_top4.iterrows():
+                champion_picks.append((r, 1))
+            log("Trading standard 1x lots for safest R1 + R3 configuration.")
 
         # ── 7G. Print Final Output ────────────────────────────────────────
         print("\n" + "="*90)
