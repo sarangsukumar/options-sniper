@@ -69,18 +69,32 @@ def main():
         )
     """
 
+    # ── SNIPER R1+R3 EXECUTION FILTER ───────────────────────────────────────
+    # The CSV contains up to 4 baseline trades for ML threshold integrity.
+    # Only Rank 1 (index 0) and Rank 3 (index 2) are actual execution orders.
+    # On scarce days (fewer than 3 candidates), only Rank 1 is inserted.
+    if len(today_records) >= 3:
+        execution_records = [today_records[0], today_records[2]]  # R1 and R3
+        print(f"ℹ️  Normal Day: Inserting R1 ({today_records[0]['stock']}) and R3 ({today_records[2]['stock']}) only.")
+    elif len(today_records) >= 1:
+        execution_records = [today_records[0]]  # R1 only on scarce days
+        print(f"ℹ️  Scarce Day: Inserting R1 ({today_records[0]['stock']}) only.")
+    else:
+        execution_records = []
+
     inserted = 0
-    for idx, rec in enumerate(today_records, start=1):
+    for idx, rec in enumerate(execution_records, start=1):
         stockname = rec['stock']
         qty = rec['qty']
-        
+        rank_label = 'TL_1' if idx == 1 else 'TL_3'
+
         cursor.execute(insert_query, (
             stockname, 0.0, qty, 'BUY', 'FALSE', 0.0,
             0.0, 0.0, target_dt, target_dt,
-            'FALSE', 'TL', 'MANISHA', f'TL_{idx}'
+            'FALSE', 'TL', 'MANISHA', rank_label
         ))
         inserted += 1
-        print(f"  ✔ Inserted: {stockname} (Qty: {qty}, Rank: TL_{idx})")
+        print(f"  ✔ Inserted: {stockname} (Qty: {qty}, Rank: {rank_label})")
 
     conn.commit()
     cursor.close()
