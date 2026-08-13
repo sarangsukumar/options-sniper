@@ -2,14 +2,17 @@
 """
 run_frozen_reference_backtest.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROZEN CLEAN REFERENCE BACKTESTER — SNIPER v3.0 (R1 + R3)
+LIVE REFERENCE BACKTESTER — SNIPER v3.0 (R1 + R3)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-This script runs directly on the immutable CLEAN_REFERENCE CSV —
-the frozen, audited 7.5-year baseline created on 2026-08-12.
+This script reads from output/trades_dynamic_threshold.csv — the live
+growing tracker that started as the Aug-12 frozen baseline and is
+auto-extended every evening by predict_today.py (4 baseline rows
+appended at actual_pnl=0.0) and healed every morning by
+merge_actuals.py (actual_pnl filled from real DB results).
 
-Because ML predictions and thresholds are already baked into the CSV,
-this backtester is 100% reproducible and free of re-training drift.
+Because ML predictions and thresholds are preserved in the CSV,
+this backtester is reproducible and free of re-training drift.
 It applies the R1+R3 sniper filter as a post-processing step, exactly
 how the Golden Target was originally produced.
 
@@ -29,7 +32,9 @@ import pandas as pd
 
 # ── Configuration ────────────────────────────────────────────────────
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
-REF_CSV       = os.path.join(SCRIPT_DIR, 'output', 'trades_dynamic_threshold_CLEAN_REFERENCE_20260812.csv')
+# Live growing tracker — same historical data as CLEAN_REFERENCE but
+# auto-extended every day by predict_today.py + merge_actuals.py
+REF_CSV       = os.path.join(SCRIPT_DIR, 'output', 'trades_dynamic_threshold.csv')
 ASSUMED_CAPITAL = 600_000.0
 TRADING_DAYS_PER_YEAR = 252
 
@@ -79,8 +84,8 @@ def compute_metrics(daily_pnl_series, capital=ASSUMED_CAPITAL):
 
 def main():
     print("\n" + "="*80)
-    print("  FROZEN REFERENCE BACKTESTER — SNIPER v3.0 R1+R3")
-    print("  Source: trades_dynamic_threshold_CLEAN_REFERENCE_20260812.csv")
+    print("  LIVE REFERENCE BACKTESTER — SNIPER v3.0 R1+R3")
+    print("  Source: output/trades_dynamic_threshold.csv (live growing tracker)")
     print("="*80)
 
     if not os.path.exists(REF_CSV):
