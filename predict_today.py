@@ -1250,7 +1250,7 @@ def main():
         print(f"{'#':<3} | {'STOCK':<12} | {'LOTS':<6} | {'SCORE':<6} | {'BAND':<8} | {'PRED PnL':<10} | {'RANK NOTE'}")
         print("-"*90)
 
-        print("\n📝 [STEP 1] CSV LOGGING (Append all these to trades_dynamic_threshold.csv to maintain ML Integrity)")
+        print("\n📝 [STEP 1] CSV LOGGING (Auto-Appended to trades_dynamic_threshold.csv to maintain ML Integrity)")
         print("-"*90)
         if is_friday_lock:
             print("   → [NO TRADES] Friday Lock is ACTIVE (no trades on Fridays)")
@@ -1310,7 +1310,36 @@ def main():
         except Exception as csv_err:
             log(f"⚠️ Warning: Failed to write predictions CSV: {csv_err}")
 
-        # ── 7G. Telegram Alert ────────────────────────────────────────────────────────────────────
+        # ── 7G. Auto-Append Baseline 4 to Master Tracker ─────────────────────────────────
+        try:
+            tracker_path = os.path.join(_THIS_DIR, 'output', 'trades_dynamic_threshold.csv')
+            if os.path.exists(tracker_path):
+                tracker_df = pd.read_csv(tracker_path)
+                today_str = today_dt.strftime('%Y-%m-%d')
+                
+                # Remove any existing rows for today to prevent duplicates if script is re-run
+                tracker_df = tracker_df[tracker_df['date'] != today_str].copy()
+                
+                new_rows = []
+                for r, _ in champion_picks:
+                    new_rows.append({
+                        'date': today_str,
+                        'day': today_dt.strftime('%A'),
+                        'stock': r['stockname'],
+                        'pred_pnl': r['pred_pnl'],
+                        'actual_pnl': 0.0,
+                        'threshold_used': current_thr
+                    })
+                
+                if new_rows:
+                    new_df = pd.DataFrame(new_rows)
+                    tracker_df = pd.concat([tracker_df, new_df], ignore_index=True)
+                    tracker_df.to_csv(tracker_path, index=False)
+                    log(f"✔ Auto-Appended {len(new_rows)} Baseline trades to Master Tracker ({today_str})")
+        except Exception as e_track:
+            log(f"⚠️ Warning: Failed to auto-append to Master Tracker: {e_track}")
+
+        # ── 7H. Telegram Alert ────────────────────────────────────────────────────────────────────
         import subprocess
         tg_lines = []
         tg_lines.append("🎯 <b>SNIPER v3.0 PREDICTIONS — R1 + R3 (1x Size)</b> 🎯")
@@ -1320,7 +1349,7 @@ def main():
         tg_lines.append(f"🔒 <b>Expiry Lock</b>: {'TOXIC (DTE: ' + str(days_to_expiry) + ')' if is_toxic_expiry else 'PASSED (DTE: ' + str(days_to_expiry) + ')'}")
         tg_lines.append(f"📊 <b>Candidates</b>: {n_candidates} {'(Normal Day)' if n_candidates >= 3 else '(Scarce Day)' if n_candidates >= 1 else '(None)'}")
         tg_lines.append("")
-        tg_lines.append("📝 <b>CSV LOGGING (Append all these to your tracker):</b>")
+        tg_lines.append("📝 <b>CSV LOGGING (Auto-Appended to Master Tracker):</b>")
         if not champion_picks:
             tg_lines.append("• [NO TRADES] No candidates qualified")
         else:
