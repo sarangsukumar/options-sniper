@@ -680,12 +680,12 @@ def predict_for_frequency(freq, train, test, today_dt, feats_t1, feats_t2, feats
     expiry_stats = train_window.groupby('days_to_expiry')['pnl'].mean()
     bad_expiry = set(expiry_stats[expiry_stats < FILTER_THRESHOLD].index)
     
-    # NO NOISE FILTER: We no longer apply the -10% Outlier Filter to strictly match original clean data
-    # if 'buy_price' in train_window.columns and 'sell_price' in train_window.columns:
-    #     train_window = train_window[
-    #         (train_window['buy_price'] > 0) & 
-    #         (((train_window['sell_price'] - train_window['buy_price']) / train_window['buy_price']) >= -0.10)
-    #     ].copy()
+    # Apply Static -10% Outlier Filter on training data
+    if 'buy_price' in train_window.columns and 'sell_price' in train_window.columns:
+        train_window = train_window[
+            (train_window['buy_price'] > 0) & 
+            (((train_window['sell_price'] - train_window['buy_price']) / train_window['buy_price']) >= -0.10)
+        ].copy()
         
     # Target Encode Seasonality
     month_day_stats = train_window.groupby('month_day_key').agg(
@@ -1170,23 +1170,28 @@ def main():
             test_scored = score_all_candidates(test, bad_expiry)
         
         # ─────────────────────────────────────────────────────────────────────
-        # STEP 7 (CHAMPION): CHAMPION STRATEGY — ML ADAPTIVE DAMPENER + DUAL CONFIRMATION
-        # ─────────────────────────────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────────
+        # STEP 7: SNIPER v3.0 — R1 + R3 (1x Size) No-Noise Architecture
+        # ─────────────────────────────────────────────────────────────────────────
+        # Mathematically locked to R1+R3 (1x each). Zero noise filters.
+        # Zero ML dual-confirmation. Zero dampener. Pure rank-based selection.
+        #   • Normal Days (3+ candidates) → Rank 1 and Rank 3 at 1x each
+        #   • Scarce Days (1 or 2 candidates) → Rank 1 Only at 1x (capital protection)
+        # ─────────────────────────────────────────────────────────────────────────
         log("="*70)
-        log("CHAMPION STRATEGY: ML ADAPTIVE DAMPENER + DUAL CONFIRMATION")
+        log("SNIPER v3.0: R1 + R3 (1x SIZE) — NO-NOISE ARCHITECTURE")
         log("="*70)
 
-        # ── 7A. Safety guards ──────────────────────────────────────────────
+        # ── 7A. Safety Guards ────────────────────────────────────────────────────
         day_name = today_dt.day_name()
         is_friday_lock = (day_name == 'Friday')
         days_to_expiry = test['days_to_expiry'].iloc[0] if not test.empty else -1
-        
-        # Compute bad_expiry from the ensemble frequency window (use full train window)
+
         expiry_stats_all = train.groupby('days_to_expiry')['pnl'].mean()
         bad_expiry_champ = set(expiry_stats_all[expiry_stats_all < FILTER_THRESHOLD].index)
         is_toxic_expiry = (days_to_expiry in bad_expiry_champ)
-        
-        # ── 7B. F&O Banlist ────────────────────────────────────────────────
+
+        # ── 7B. F&O Banlist ────────────────────────────────────────────────────────
         ban_path = '/home/ubuntu/banlist/fo_ban_list_historical.csv'
         banned_today = set()
         if os.path.exists(ban_path):
@@ -1198,184 +1203,70 @@ def main():
                 log(f"F&O Banlist loaded. Banned today: {banned_today if banned_today else 'None'}")
             except Exception as e_ban:
                 log(f"⚠️ Warning: Could not load F&O Ban list: {e_ban}")
-        
-        # ── 7C. Build today's Static Ensemble top 4 from the scored candidates ──
+
+        # ── 7C. Build ranked candidate list (sorted by pred_pnl, ban-filtered) ──
         test_candidates = test_scored.drop_duplicates(subset=['stockname']).sort_values('pred_pnl', ascending=False)
         if banned_today and not test_candidates.empty:
             test_candidates = test_candidates[~test_candidates['stockname'].str.strip().str.upper().isin(banned_today)].copy()
-        
-        # Static Ensemble - Explicitly picking R1 and R3 (indices 0 and 2) based on historical maximin PnL optimization
-        if not is_friday_lock and not is_toxic_expiry and len(test_candidates) > 0:
-            if len(test_candidates) >= 3:
-                static_top4 = test_candidates.iloc[[0, 2]].copy()
-            else:
-                static_top4 = test_candidates.iloc[[0]].copy()
-        else:
-            static_top4 = pd.DataFrame()
-        static_top_stocks = static_top4['stockname'].tolist() if not static_top4.empty else []
-        
-        # ── 7D. ML Regime Selector — Ridge Regression on frequency PnL history ──
-        # Load historical frequency CSVs from the historical_models output folder
-        hist_output_dir = os.path.join(_THIS_DIR, 'historical_models', 'output')
-        freqs = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly']
-        freq_hist_dfs = {}
-        ml_available = True
-        for freq in freqs:
-            p = os.path.join(hist_output_dir, f'trades_dynamic_threshold_{freq}.csv')
-            if os.path.exists(p):
-                df_freq = pd.read_csv(p)
-                df_freq['date'] = pd.to_datetime(df_freq['date'])
-                freq_hist_dfs[freq] = df_freq
-            else:
-                log(f"⚠️ Historical CSV missing: {p}. ML Regime Selector will be skipped.")
-                ml_available = False
-                break
+        test_candidates = test_candidates.reset_index(drop=True)
+        n_candidates = len(test_candidates)
 
-        ml_stocks = set()
-        dampener_active = False
-        champion_stock = None
-        ml_mode_label = "STATIC ENSEMBLE (ML data unavailable)"
+        # ── 7D. Sniper R1+R3 Pick Logic ───────────────────────────────────────────────
+        sniper_picks = []  # list of (row, lots)
 
-        if ml_available:
-            # Build daily PnL series per frequency
-            all_hist_dates = set()
-            for df_freq in freq_hist_dfs.values():
-                all_hist_dates.update(df_freq['date'].unique())
-            all_hist_dates = sorted(list(all_hist_dates))
-
-            daily_pnl_hist = {freq: pd.Series(0.0, index=all_hist_dates) for freq in freqs}
-            for freq, df_freq in freq_hist_dfs.items():
-                dp = df_freq.groupby('date')['actual_pnl'].sum()
-                daily_pnl_hist[freq].update(dp)
-
-            df_pnl_hist = pd.DataFrame(daily_pnl_hist)
-            df_pnl_hist['date'] = df_pnl_hist.index
-            df_pnl_hist = df_pnl_hist.reset_index(drop=True)
-
-            # Rolling PnL features (no lookahead — shifted by 1)
-            pnl_feats = pd.DataFrame({'date': df_pnl_hist['date']})
-            for freq in freqs:
-                for window in [3, 7, 14, 30]:
-                    pnl_feats[f'{freq}_sum_{window}'] = df_pnl_hist[freq].rolling(window).sum().shift(1)
-                    pnl_feats[f'{freq}_mean_{window}'] = df_pnl_hist[freq].rolling(window).mean().shift(1)
-
-            # Market-level features from f11
-            f11_path_ml = os.path.join(DATA_DIR, 'f11_intraday_features_all.csv')
-            df_f11_ml = pd.read_csv(f11_path_ml)
-            df_f11_ml['Date'] = pd.to_datetime(df_f11_ml['Date'], format='mixed', dayfirst=True)
-            mkt_feats = df_f11_ml.groupby('Date').agg(
-                market_volatility=('intraday_volatility', 'mean') if 'intraday_volatility' in df_f11_ml.columns else ('intraday_return', 'std'),
-                market_return=('intraday_return', 'mean'),
-                market_trend=('intraday_rsi_9', 'mean'),
-                market_adv_dec=('intraday_return', lambda x: (x > 0).mean()),
-                market_macd=('intraday_macd', 'mean') if 'intraday_macd' in df_f11_ml.columns else ('intraday_return', 'mean'),
-            ).reset_index().rename(columns={'Date': 'date'})
-
-            df_master_ml = pd.merge(df_pnl_hist, pnl_feats, on='date', how='inner')
-            df_master_ml = pd.merge(df_master_ml, mkt_feats, on='date', how='inner')
-            df_master_ml = df_master_ml.dropna().reset_index(drop=True)
-
-            ml_feature_cols = [c for c in df_master_ml.columns if c not in ['date'] + freqs]
-
-            # Only train ML if we have enough history (>= 100 rows before today)
-            train_ml = df_master_ml[df_master_ml['date'] < today_dt]
-            test_ml_row = df_master_ml[df_master_ml['date'] == today_dt]
-
-            if len(train_ml) >= 100 and not test_ml_row.empty:
-                X_tr = train_ml[ml_feature_cols].values
-                X_te = test_ml_row[ml_feature_cols].values
-
-                scaler_ml = StandardScaler()
-                X_tr_sc = scaler_ml.fit_transform(X_tr)
-                X_te_sc = scaler_ml.transform(X_te)
-
-                freq_score = {}
-                for freq in freqs:
-                    y_tr = train_ml[freq].values
-                    mdl = Ridge(alpha=1.0, random_state=42)
-                    mdl.fit(X_tr_sc, y_tr)
-                    freq_score[freq] = mdl.predict(X_te_sc)[0]
-
-                top2_freqs = sorted(freq_score, key=freq_score.get, reverse=True)[:2]
-                log(f"ML Regime Selector → Top 2 frequencies today: {top2_freqs} (scores: {[(f, round(freq_score[f], 0)) for f in top2_freqs]})")
-
-                for freq in top2_freqs:
-                    df_freq_today = freq_hist_dfs[freq][freq_hist_dfs[freq]['date'] == today_dt]
-                    ml_stocks.update(df_freq_today['stock'].unique())
-
-                # ── 7E. Adaptive Weekly Dampener ───────────────────────────
-                # Uses our OWN past completed ISO week performance from historical trades
-                ens_hist_path = os.path.join(hist_output_dir, 'trades_dynamic_threshold_ensemble.csv')
-                if os.path.exists(ens_hist_path):
-                    df_ens_hist = pd.read_csv(ens_hist_path)
-                    df_ens_hist['date'] = pd.to_datetime(df_ens_hist['date'])
-                    df_ens_past = df_ens_hist[df_ens_hist['date'] < today_dt].copy()
-                    if not df_ens_past.empty:
-                        df_ens_past['iso_year'] = df_ens_past['date'].dt.isocalendar().year
-                        df_ens_past['iso_week'] = df_ens_past['date'].dt.isocalendar().week
-                        today_iso = today_dt.isocalendar()
-                        curr_yr, curr_wk = today_iso[0], today_iso[1]
-                        completed = df_ens_past[~((df_ens_past['iso_year'] == curr_yr) & (df_ens_past['iso_week'] == curr_wk))]
-                        if not completed.empty:
-                            weekly_pnl = completed.groupby(['iso_year', 'iso_week'])['actual_pnl'].sum()
-                            last_week_pnl = weekly_pnl.iloc[-1]
-                            if last_week_pnl < 0:
-                                dampener_active = True
-                                log(f"⚠️ DAMPENER ACTIVE: Last completed week PnL = Rs {last_week_pnl:,.0f} (negative). Reverting to Standard Static Ensemble for safety.")
-                            else:
-                                log(f"✅ DAMPENER OFF: Last completed week PnL = Rs {last_week_pnl:,.0f} (positive). Full ML Dual Confirmation mode ACTIVE.")
-
-                ml_mode_label = "DAMPENER MODE (Standard Static)" if dampener_active else "ML DUAL CONFIRMATION MODE"
-            else:
-                log(f"⚠️ Insufficient ML training history ({len(train_ml)} rows). Falling back to Standard Static Ensemble.")
-                ml_mode_label = "STATIC ENSEMBLE (ML warmup)"
-
-        # ── 7F. Build Champion Final Picks ────────────────────────────────
-        champion_picks = []  # list of (row, lots)
-        
         if is_friday_lock or is_toxic_expiry:
-            pass  # No trades
-        elif static_top_stocks:
-            # FORCE R1 + R3 at 1x LOT EACH (Safest Configuration)
-            for _, r in static_top4.iterrows():
-                champion_picks.append((r, 1))
-            log("Trading standard 1x lots for safest R1 + R3 configuration.")
+            pass  # No trades — safety locks active
+        elif n_candidates >= 3:
+            # Normal Day: Rank 1 (index 0) and Rank 3 (index 2) at 1x each
+            r1_row = test_candidates.iloc[0]
+            r3_row = test_candidates.iloc[2]
+            sniper_picks = [(r1_row, 1), (r3_row, 1)]
+            log(f"Normal Day ({n_candidates} candidates). Picks: R1={r1_row['stockname']} | R3={r3_row['stockname']}")
+        elif n_candidates >= 1:
+            # Scarce Day: Rank 1 Only at 1x — protect capital
+            r1_row = test_candidates.iloc[0]
+            sniper_picks = [(r1_row, 1)]
+            log(f"Scarce Day ({n_candidates} candidate(s)). Picks: R1={r1_row['stockname']} only.")
+        else:
+            log("No candidates available today. No trades.")
 
-        # ── 7G. Print Final Output ────────────────────────────────────────
+        # ── 7E. Print Final Output ─────────────────────────────────────────────────────
         print("\n" + "="*90)
-        print(f"              🏆 CHAMPION STRATEGY — TODAY'S TRADING RECOMMENDATIONS 🏆")
+        print(f"              🎯 SNIPER v3.0 — R1 + R3 (1x Size) TRADING RECOMMENDATIONS 🎯")
         print(f"                  TARGET DATE: {today_dt.strftime('%A, %Y-%m-%d')}")
         print("="*90)
-        print(f"Mode               : {ml_mode_label}")
-        print(f"Market Status      : {'⛔ FRIDAY LOCK (NO TRADES)' if is_friday_lock else '✅ ACTIVE'}")
-        print(f"Expiry Safety Lock : {'⛔ TOXIC EXPIRY (NO TRADES, DTE: ' + str(days_to_expiry) + ')' if is_toxic_expiry else '✅ PASSED (DTE: ' + str(days_to_expiry) + ')'}")
-        print(f"Dampener Status    : {'🛡️ ACTIVE (protective mode)' if dampener_active else '🚀 OFF (full ML mode)'}")
-        print(f"ML Stocks Pool     : {sorted(ml_stocks) if ml_stocks else 'N/A'}")
-        print(f"Dual Confirmed     : {champion_stock if champion_stock else 'None'}")
+        print(f"Architecture       : R1 + R3 (1x Size) — No-Noise (Sniper v3.0)")
+        _mkt_str = '\u26d4 FRIDAY LOCK (NO TRADES)' if is_friday_lock else '\u2705 ACTIVE'
+        _exp_str = ('\u26d4 TOXIC EXPIRY (NO TRADES, DTE: ' + str(days_to_expiry) + ')') if is_toxic_expiry else ('\u2705 PASSED (DTE: ' + str(days_to_expiry) + ')')
+        print(f"Market Status      : {_mkt_str}")
+        print(f"Expiry Safety Lock : {_exp_str}")
+        print(f"Total Candidates   : {n_candidates}")
+        print(f"Day Type           : {'Normal Day (R1+R3)' if n_candidates >= 3 else 'Scarce Day (R1 Only)' if n_candidates >= 1 else 'No Candidates'}")
         print("-"*90)
-        print(f"{'#':<3} | {'STOCK':<12} | {'LOTS':<6} | {'SCORE':<6} | {'BAND':<8} | {'PRED PnL':<10} | {'NOTE'}")
+        print(f"{'#':<3} | {'STOCK':<12} | {'LOTS':<6} | {'SCORE':<6} | {'BAND':<8} | {'PRED PnL':<10} | {'RANK NOTE'}")
         print("-"*90)
 
         if is_friday_lock:
             print("   → [NO TRADES] Friday Lock is ACTIVE (no trades on Fridays)")
         elif is_toxic_expiry:
             print(f"   → [NO TRADES] Toxic Expiry Lock ACTIVE (DTE: {days_to_expiry} is high-risk)")
-        elif not champion_picks:
+        elif not sniper_picks:
             print("   → [NO TRADES] No stock candidates qualified today")
         else:
-            for idx, (r, qty) in enumerate(champion_picks, 1):
-                lot_label = "2x ⭐ CHAMPION" if qty == 2 else "1x Standard"
-                print(f"{idx:<3} | {r['stockname']:<12} | {lot_label:<14} | {r['score']:>5.1f} | {r['band']:<8} | Rs {r['pred_pnl']:>7.0f}  | {'← Dual Confirmed ML' if r['stockname'] == champion_stock else ''}")
+            rank_labels = {0: "Rank 1", 1: "Rank 3"}
+            for idx, (r, qty) in enumerate(sniper_picks):
+                print(f"{idx+1:<3} | {r['stockname']:<12} | {qty}x     | {r['score']:>5.1f} | {r['band']:<8} | Rs {r['pred_pnl']:>7.0f}  | ← {rank_labels.get(idx, 'Rank ?')}")
 
         print("="*90)
         print(f"\n📊 Top 10 Candidates (for reference):")
         print(f"{'#':<3} | {'STOCK':<12} | {'SCORE':<6} | {'BAND':<8} | {'PRED PnL':<10}")
         print("-"*55)
         for idx, (_, row) in enumerate(test_candidates.head(10).iterrows(), 1):
-            print(f"{idx:<3} | {row['stockname']:<12} | {row['score']:>5.1f} | {row['band']:<8} | Rs {row['pred_pnl']:>7.0f}")
+            marker = " ← PICKED" if idx in [1, 3] and n_candidates >= 3 else (" ← PICKED" if idx == 1 and 1 <= n_candidates < 3 else "")
+            print(f"{idx:<3} | {row['stockname']:<12} | {row['score']:>5.1f} | {row['band']:<8} | Rs {row['pred_pnl']:>7.0f}{marker}")
         print("="*90 + "\n")
 
-        # ── 7H. Write predictions to predictedstocksfortoday.csv ─────────
+        # ── 7F. Write predictions to predictedstocksfortoday.csv ──────────────────
         try:
             import csv
             predicted_stocks_path = os.path.join(_THIS_DIR, 'output', 'predictedstocksfortoday.csv')
@@ -1391,7 +1282,7 @@ def main():
                             existing_records.append(row)
 
             records_to_append = []
-            for r, qty in champion_picks:
+            for r, qty in sniper_picks:
                 records_to_append.append([date_str, r['stockname'], qty])
 
             with open(predicted_stocks_path, 'w', newline='') as f_write:
@@ -1402,50 +1293,19 @@ def main():
                     writer.writerows(records_to_append)
 
             if records_to_append:
-                log(f"✔ Wrote {len(records_to_append)} Champion picks to predictedstocksfortoday.csv for {date_str}")
+                log(f"✔ Wrote {len(records_to_append)} Sniper v3.0 picks to predictedstocksfortoday.csv for {date_str}")
         except Exception as csv_err:
             log(f"⚠️ Warning: Failed to write predictions CSV: {csv_err}")
 
-        # ── 7H2. Insert into markets.orders table ─────────────────────────
-        try:
-            import pymysql
-            import random
-            
-            conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
-            cursor = conn.cursor()
-            
-            sim_time = today_dt.strftime('%Y-%m-%d 00:00:00')
-            cre_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            for idx, (r, qty) in enumerate(champion_picks, 1):
-                stock = r['stockname']
-                price = 0.0
-                order_rank = f"TL_{idx}"
-                
-                sql = """
-                    INSERT INTO orders (stockname, price, quantity, type, ismarket, stoplossprice, 
-                                        limitprice, limitprice_original, simulationtime, cretime, modtime, 
-                                        credate, isvalid, is_future, USER, order_rank)
-                    VALUES (%s, %s, %s, 'BUY', 0, NULL, %s, %s, %s, %s, %s, NULL, 'FALSE', 'TL', 'MANISHA', %s)
-                """
-                cursor.execute(sql, (stock, price, qty, price, price, sim_time, cre_time, cre_time, order_rank))
-                
-            conn.commit()
-            cursor.close()
-            conn.close()
-            log(f"✔ Successfully inserted {len(champion_picks)} Champion picks into markets.orders table.")
-        except Exception as db_err:
-            log(f"⚠️ Warning: Failed to insert into markets.orders: {db_err}")
-
-        # ── 7I. Telegram Alert ────────────────────────────────────────────
+        # ── 7G. Telegram Alert ────────────────────────────────────────────────────────────────────
         import subprocess
         tg_lines = []
-        tg_lines.append("🏆 <b>CHAMPION STRATEGY PREDICTIONS</b> 🏆")
+        tg_lines.append("🎯 <b>SNIPER v3.0 PREDICTIONS — R1 + R3 (1x Size)</b> 🎯")
         tg_lines.append(f"📅 <b>Date</b>: {today_dt.strftime('%A, %Y-%m-%d')}")
-        tg_lines.append(f"⚙️ <b>Mode</b>: {ml_mode_label}")
-        tg_lines.append(f"🛡️ <b>Dampener</b>: {'ACTIVE (protective)' if dampener_active else 'OFF (full ML)'}")
+        tg_lines.append(f"⚙️ <b>Architecture</b>: R1 + R3 No-Noise (Sniper v3.0)")
         tg_lines.append(f"🚪 <b>Market</b>: {'FRIDAY LOCK' if is_friday_lock else 'ACTIVE'}")
         tg_lines.append(f"🔒 <b>Expiry Lock</b>: {'TOXIC (DTE: ' + str(days_to_expiry) + ')' if is_toxic_expiry else 'PASSED (DTE: ' + str(days_to_expiry) + ')'}")
+        tg_lines.append(f"📊 <b>Candidates</b>: {n_candidates} {'(Normal Day)' if n_candidates >= 3 else '(Scarce Day)' if n_candidates >= 1 else '(None)'}")
         tg_lines.append("")
         tg_lines.append("🎯 <b>FINAL RECOMMENDATIONS:</b>")
 
@@ -1453,16 +1313,12 @@ def main():
             tg_lines.append("• [NO TRADES] Friday Lock Active")
         elif is_toxic_expiry:
             tg_lines.append(f"• [NO TRADES] Toxic Expiry Lock (DTE: {days_to_expiry})")
-        elif not champion_picks:
+        elif not sniper_picks:
             tg_lines.append("• [NO TRADES] No candidates qualified")
         else:
-            for idx, (r, qty) in enumerate(champion_picks, 1):
-                lot_label = "2x ⭐ CHAMPION" if qty == 2 else "1x"
-                tg_lines.append(f"{idx}. <b>{r['stockname']}</b> — {lot_label} (Rs {r['pred_pnl']:,.0f})")
-
-        if ml_stocks and not dampener_active:
-            tg_lines.append("")
-            tg_lines.append(f"🤖 <b>ML Pool</b>: {', '.join(sorted(ml_stocks)[:8])}")
+            rank_labels_tg = {0: "R1", 1: "R3"}
+            for idx, (r, qty) in enumerate(sniper_picks):
+                tg_lines.append(f"{idx+1}. <b>{r['stockname']}</b> — {rank_labels_tg.get(idx,'?')} @ 1x (Rs {r['pred_pnl']:,.0f})")
 
         tg_lines.append("")
         tg_lines.append("💡 <b>Top Candidates:</b>")
@@ -1475,7 +1331,7 @@ def main():
             bot_path = "/home/ubuntu/telegram_bot/New_OrderInfoBot.js"
             if os.path.exists(bot_path):
                 subprocess.run(["node", bot_path, tg_msg], check=True, timeout=15)
-                log("Telegram alert sent successfully via Champion Strategy.")
+                log("Telegram alert sent successfully via Sniper v3.0.")
             else:
                 log(f"Warning: OrderInfoBot not found at {bot_path}")
         except Exception as tg_err:

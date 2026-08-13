@@ -1168,7 +1168,7 @@ def run_dynamic_threshold(start_year=2019, end_year=2025, pt=1800, mt=4, ra=5.0,
         else:
             candidates = candidates.sort_values('pred_pnl', ascending=False)
         
-        strategy = os.getenv('DYN_ALLOCATION_STRATEGY', 'baseline').lower()
+        strategy = os.getenv('DYN_ALLOCATION_STRATEGY', 'r1_r3').lower()
         
         selected_rows = []
         sector_counts = {}
@@ -1271,6 +1271,27 @@ def run_dynamic_threshold(start_year=2019, end_year=2025, pt=1800, mt=4, ra=5.0,
                 if current_sec_count < DYN_SECTOR_CAP:
                     selected_rows.append((row, 4.0))
                     break
+
+        elif strategy == 'r1_r3':
+            # ─── SNIPER v3.0: R1 + R3 (1x Size) No-Noise Architecture ───────
+            # Normal Days (3+ sector-eligible candidates): Rank 1 and Rank 3 at 1x each.
+            # Scarce Days (1 or 2 candidates): Rank 1 Only at 1x to protect capital.
+            # Completely bypasses all noise filters and ML dual-confirmation.
+            eligible = []
+            for _, row in candidates.iterrows():
+                ticker = row[sc]
+                sector = get_stock_sector(ticker)
+                current_sec_count = sector_counts.get(sector, 0)
+                if current_sec_count < DYN_SECTOR_CAP:
+                    eligible.append(row)
+                    sector_counts[sector] = current_sec_count + 1
+            if len(eligible) >= 3:
+                # Normal day: pick Rank 1 (index 0) and Rank 3 (index 2) at 1x each
+                selected_rows.append((eligible[0], 1.0))
+                selected_rows.append((eligible[2], 1.0))
+            elif len(eligible) >= 1:
+                # Scarce day: Rank 1 Only at 1x
+                selected_rows.append((eligible[0], 1.0))
                     
         elif strategy == 'progressive':
             # Select up to 4 trades. Rank 1 gets 2.0, Rank 2 gets 1.0, Rank 3 gets 0.67, Rank 4 gets 0.33. Total units = 4.0.

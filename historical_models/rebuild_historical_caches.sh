@@ -15,7 +15,7 @@ echo "          REBUILDING HISTORICAL CACHES FROM SCRATCH"
 echo "=========================================================================="
 
 export REMOVE_EXTREME_TRAINING_LOSSES=False
-export NOISE_CLEANING_METHOD=none
+export NOISE_CLEANING_METHOD=static_10
 export START_YEAR=2019
 export END_YEAR=2026
 export DISABLE_PDF=True

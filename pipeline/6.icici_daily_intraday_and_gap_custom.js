@@ -167,13 +167,13 @@ if (process.argv[2] && /^\d{4}-\d{2}-\d{2}$/.test(process.argv[2])) {
     console.log(`[ARG] No valid target date provided. Using today: ${TARGET_DATE}`);
 }
 
-const FROM_DATE = `${TARGET_DATE}T07:00:00.000Z`;
-const TO_DATE   = `${TARGET_DATE}T17:00:00.000Z`;
+const FROM_DATE = `${TARGET_DATE}T03:30:00.000Z`;
+const TO_DATE   = `${TARGET_DATE}T15:30:00.000Z`;
 
 function deleteRecordsForDate(targetDate) {
     return new Promise((resolve, reject) => {
-        const sql = `DELETE FROM ${TABLENAME} WHERE DATE(date) = ?`;
-        connection.query(sql, [targetDate], (err, results) => {
+        const sql = `DELETE FROM ${TABLENAME} WHERE date >= ? AND date <= ?`;
+        connection.query(sql, [`${targetDate} 00:00:00`, `${targetDate} 23:59:59`], (err, results) => {
             if (err) return reject(err);
             console.log(`[DB] Deleted ${results.affectedRows} existing records for target date ${targetDate}.`);
             resolve();
@@ -222,10 +222,11 @@ async function runDownload() {
         while (attempts < 3 && !fetchSuccess) {
             attempts++;
             try {
+                const iciciScripCode = scripCodesMap[stockCode];
                 breezeRes = await withTimeout(
-                    fetchIntraday(stockCode),
+                    fetchIntraday(iciciScripCode),
                     12000,
-                    `Timeout for ${stockCode}`
+                    `Timeout for ${stockCode} (${iciciScripCode})`
                 );
 
                 if (isSessionError(breezeRes, null)) {

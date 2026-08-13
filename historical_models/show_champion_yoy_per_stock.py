@@ -35,8 +35,8 @@ import numpy as np
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 
-OUTPUT_DIR = "/home/ubuntu/predictive_regime_sandbox/historical_models/output"
-DATA_DIR = "/home/ubuntu/predictive_regime_sandbox/data"
+OUTPUT_DIR = "/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/historical_models/output"
+DATA_DIR = "/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/data"
 
 def run_backtest():
     freqs = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly']
@@ -168,31 +168,31 @@ def run_backtest():
             day_pnl_sum = 0.0
             
             if dampener_active:
-                # Dampener Active: Standard 1 lot each (Static Ensemble behavior)
-                for idx, r in day_static.iterrows():
+                # Dampener Active: Standard 1 lot each (Static Ensemble behavior limited to Max 2)
+                for idx, r in day_static.head(2).iterrows():
                     dampened_daily_trades.append({'date': dt, 'stock': r['stock'], 'actual_pnl': r['actual_pnl'], 'lots': 1})
                     day_pnl_sum += r['actual_pnl']
             else:
-                # Normal: Guaranteed ML Dual Shift
+                # Normal: Guaranteed ML Dual Shift for Max 2 Orders
                 dual_confirmed_stock = None
-                for s in static_stocks[:3]:
+                for s in static_stocks[:2]:
                     if s in ml_stocks:
                         dual_confirmed_stock = s
                         break
                         
-                if dual_confirmed_stock and len(static_stocks) >= 4:
-                    for idx, r in day_static.iterrows():
+                if dual_confirmed_stock and len(static_stocks) >= 2:
+                    for idx, r in day_static.head(2).iterrows():
                         stock = r['stock']
                         pnl = r['actual_pnl']
                         
                         if stock == dual_confirmed_stock:
                             dampened_daily_trades.append({'date': dt, 'stock': stock, 'actual_pnl': pnl * 2, 'lots': 2})
                             day_pnl_sum += pnl * 2
-                        elif stock != static_stocks[3]:
+                        else:
                             dampened_daily_trades.append({'date': dt, 'stock': stock, 'actual_pnl': pnl, 'lots': 1})
                             day_pnl_sum += pnl
                 else:
-                    for idx, r in day_static.iterrows():
+                    for idx, r in day_static.head(2).iterrows():
                         dampened_daily_trades.append({'date': dt, 'stock': r['stock'], 'actual_pnl': r['actual_pnl'], 'lots': 1})
                         day_pnl_sum += r['actual_pnl']
                         
