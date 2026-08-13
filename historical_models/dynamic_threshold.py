@@ -1277,14 +1277,33 @@ def run_dynamic_threshold(start_year=2019, end_year=2025, pt=1800, mt=4, ra=5.0,
             # Normal Days (3+ sector-eligible candidates): Rank 1 and Rank 3 at 1x each.
             # Scarce Days (1 or 2 candidates): Rank 1 Only at 1x to protect capital.
             # Completely bypasses all noise filters and ML dual-confirmation.
+            #
+            # ── GHOST BASELINE (Threshold Defence Fix) ──────────────────────
+            # The dynamic threshold (current_thr) must be updated as-if we
+            # traded a full 4-stock baseline, otherwise the threshold never
+            # raises during losing markets (e.g. 2025) and lets toxic trades
+            # slip through.  We compute a ghost PnL from up to 4 eligible
+            # candidates and use THAT to drive the threshold state machine,
+            # while only recording R1 + R3 as the real executed trades.
             eligible = []
+            ghost_sector_counts = {}
             for _, row in candidates.iterrows():
                 ticker = row[sc]
                 sector = get_stock_sector(ticker)
-                current_sec_count = sector_counts.get(sector, 0)
+                current_sec_count = ghost_sector_counts.get(sector, 0)
                 if current_sec_count < DYN_SECTOR_CAP:
                     eligible.append(row)
-                    sector_counts[sector] = current_sec_count + 1
+                    ghost_sector_counts[sector] = current_sec_count + 1
+                    sector_counts[sector] = sector_counts.get(sector, 0) + 1
+                    if len(eligible) >= 4:  # ghost baseline cap = 4
+                        break
+
+            # Ghost baseline PnL (drives threshold state machine)
+            ghost_baseline_pnl = sum(row['pnl'] for row in eligible[:4])
+            # Store on the function object so the threshold block below can read it
+            run_dynamic_threshold._ghost_baseline_pnl = ghost_baseline_pnl
+
+            # Actual sniper picks: R1 + R3 only (or R1 on scarce days)
             if len(eligible) >= 3:
                 # Normal day: pick Rank 1 (index 0) and Rank 3 (index 2) at 1x each
                 selected_rows.append((eligible[0], 1.0))
@@ -1577,7 +1596,17 @@ def run_dynamic_threshold(start_year=2019, end_year=2025, pt=1800, mt=4, ra=5.0,
             })
             
             # Update threshold logic
-            if day_pnl < 0:
+            # ── GHOST BASELINE DEFENCE (r1_r3 strategy) ─────────────────────
+            # Use the ghost 4-stock PnL to drive the threshold state machine so
+            # that the threshold properly raises during losing market regimes,
+            # even though only R1+R3 are recorded as real trades.
+            thr_pnl = getattr(run_dynamic_threshold, '_ghost_baseline_pnl', day_pnl) \
+                      if strategy == 'r1_r3' else day_pnl
+            # Clear the ghost signal after consuming it
+            if strategy == 'r1_r3':
+                run_dynamic_threshold._ghost_baseline_pnl = None
+
+            if thr_pnl < 0:
                 consec_loss += 1
                 consec_win = 0
             else:
@@ -1617,7 +1646,7 @@ def run_dynamic_threshold(start_year=2019, end_year=2025, pt=1800, mt=4, ra=5.0,
                     dyn_max_factor = DYN_MAX_FACTOR * bounds_mult
                     dyn_min_factor = DYN_MIN_FACTOR * bounds_mult
 
-            if ENABLE_OPTION_1 and day_pnl <= emergency_limit:
+            if ENABLE_OPTION_1 and thr_pnl <= emergency_limit:
                 current_thr = min(current_thr + pt * EMERGENCY_RAISE_STEP, pt * dyn_max_factor)
                 consec_loss = 0  # reset consecutive loss since we took emergency action
             else:
