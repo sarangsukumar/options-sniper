@@ -79,28 +79,12 @@ Run the pipeline to fetch intraday ticks and gap features after 3:19 PM:
 ./pipeline/run_todays_prediction_pipeline.sh
 ```
 
-### Step 2 — Run Today's Predictions
+## ⚡ 2. DAILY PREDICTIONS (`predict_today.py`)
+This script uses the `data/` folder to generate today's live trades.
+
 ```bash
 python3 predict_today.py
 ```
-
-**Automated R1+R3 Logic (built into the script):**
-
-| Condition | Action |
-| :--- | :--- |
-| Normal Day (3+ candidates) | Outputs exactly **Rank 1 and Rank 3** at **1x size** |
-| Scarce Day (1 or 2 candidates) | Defaults to **Rank 1 Only** at 1x (capital protection) |
-| Dead Market (0 candidates) | Prints `[NO TRADES]` |
-| Friday | `[NO TRADES]` — Friday Lock active |
-| Toxic Expiry DTE | `[NO TRADES]` — Expiry Lock active |
-
-> The script automatically bypasses all noise filters and ML dual-confirmation. Zero extra steps needed.
-
-### Step 3 — Append to the Master Tracker
-After `predict_today.py` prints today's picks, append the new rows to:
-
-```
-output/trades_dynamic_threshold.csv
 ```
 
 > **Do NOT overwrite.** Only append to the bottom.

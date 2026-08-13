@@ -1211,22 +1211,26 @@ def main():
         test_candidates = test_candidates.reset_index(drop=True)
         n_candidates = len(test_candidates)
 
-        # ── 7D. Sniper R1+R3 Pick Logic ───────────────────────────────────────────────
-        sniper_picks = []  # list of (row, lots)
+        # ── 7D. ML Threshold Baseline & Execution Logic ─────────────────────────────
+        # 1. First, build the exact 4-Trade Baseline for ML Threshold Integrity
+        static_top4 = test_candidates.head(4)
+        champion_picks = []  # These are the 4 trades for CSV Logging
+        
+        # 2. Mathematically isolate the real R1+R3 trades for Execution
+        execution_picks = [] 
 
         if is_friday_lock or is_toxic_expiry:
             pass  # No trades — safety locks active
         elif n_candidates >= 3:
-            # Normal Day: Rank 1 (index 0) and Rank 3 (index 2) at 1x each
-            r1_row = test_candidates.iloc[0]
-            r3_row = test_candidates.iloc[2]
-            sniper_picks = [(r1_row, 1), (r3_row, 1)]
-            log(f"Normal Day ({n_candidates} candidates). Picks: R1={r1_row['stockname']} | R3={r3_row['stockname']}")
+            for _, r in static_top4.iterrows():
+                champion_picks.append((r, 1))
+            execution_picks = [static_top4.iloc[0], static_top4.iloc[2]]
+            log(f"Normal Day. Baseline 4 logged. Sniper Executing R1={execution_picks[0]['stockname']} | R3={execution_picks[1]['stockname']}")
         elif n_candidates >= 1:
-            # Scarce Day: Rank 1 Only at 1x — protect capital
-            r1_row = test_candidates.iloc[0]
-            sniper_picks = [(r1_row, 1)]
-            log(f"Scarce Day ({n_candidates} candidate(s)). Picks: R1={r1_row['stockname']} only.")
+            for _, r in static_top4.iterrows():
+                champion_picks.append((r, 1))
+            execution_picks = [static_top4.iloc[0]]
+            log(f"Scarce Day. Baseline logged. Sniper Executing R1={execution_picks[0]['stockname']} only.")
         else:
             log("No candidates available today. No trades.")
 
@@ -1246,16 +1250,25 @@ def main():
         print(f"{'#':<3} | {'STOCK':<12} | {'LOTS':<6} | {'SCORE':<6} | {'BAND':<8} | {'PRED PnL':<10} | {'RANK NOTE'}")
         print("-"*90)
 
+        print("\n📝 [STEP 1] CSV LOGGING (Append all these to trades_dynamic_threshold.csv to maintain ML Integrity)")
+        print("-"*90)
         if is_friday_lock:
             print("   → [NO TRADES] Friday Lock is ACTIVE (no trades on Fridays)")
         elif is_toxic_expiry:
             print(f"   → [NO TRADES] Toxic Expiry Lock ACTIVE (DTE: {days_to_expiry} is high-risk)")
-        elif not sniper_picks:
+        elif not champion_picks:
             print("   → [NO TRADES] No stock candidates qualified today")
         else:
-            rank_labels = {0: "Rank 1", 1: "Rank 3"}
-            for idx, (r, qty) in enumerate(sniper_picks):
-                print(f"{idx+1:<3} | {r['stockname']:<12} | {qty}x     | {r['score']:>5.1f} | {r['band']:<8} | Rs {r['pred_pnl']:>7.0f}  | ← {rank_labels.get(idx, 'Rank ?')}")
+            for idx, (r, qty) in enumerate(champion_picks, 1):
+                print(f"{idx:<3} | {r['stockname']:<12} | 1x Standard    | {r['score']:>5.1f} | {r['band']:<8} | Rs {r['pred_pnl']:>7.0f}")
+
+        print("\n🎯 [STEP 2] ACTUAL BROKER EXECUTION (R1 + R3 Sniper Mode)")
+        print("-"*90)
+        if not is_friday_lock and not is_toxic_expiry and execution_picks:
+            for idx, r in enumerate(execution_picks, 1):
+                print(f"🔥 BUY 1x: {r['stockname']:<12} (Rs {r['pred_pnl']:>7.0f})")
+        else:
+            print("   → [NO TRADES] Nothing to execute today.")
 
         print("="*90)
         print(f"\n📊 Top 10 Candidates (for reference):")
@@ -1282,7 +1295,7 @@ def main():
                             existing_records.append(row)
 
             records_to_append = []
-            for r, qty in sniper_picks:
+            for r, qty in champion_picks:
                 records_to_append.append([date_str, r['stockname'], qty])
 
             with open(predicted_stocks_path, 'w', newline='') as f_write:
@@ -1307,18 +1320,24 @@ def main():
         tg_lines.append(f"🔒 <b>Expiry Lock</b>: {'TOXIC (DTE: ' + str(days_to_expiry) + ')' if is_toxic_expiry else 'PASSED (DTE: ' + str(days_to_expiry) + ')'}")
         tg_lines.append(f"📊 <b>Candidates</b>: {n_candidates} {'(Normal Day)' if n_candidates >= 3 else '(Scarce Day)' if n_candidates >= 1 else '(None)'}")
         tg_lines.append("")
-        tg_lines.append("🎯 <b>FINAL RECOMMENDATIONS:</b>")
+        tg_lines.append("📝 <b>CSV LOGGING (Append all these to your tracker):</b>")
+        if not champion_picks:
+            tg_lines.append("• [NO TRADES] No candidates qualified")
+        else:
+            for idx, (r, qty) in enumerate(champion_picks, 1):
+                tg_lines.append(f"{idx}. {r['stockname']} (Rs {r['pred_pnl']:,.0f})")
 
+        tg_lines.append("")
+        tg_lines.append("🎯 <b>ACTUAL BROKER EXECUTION (R1 + R3 Sniper Mode):</b>")
         if is_friday_lock:
             tg_lines.append("• [NO TRADES] Friday Lock Active")
         elif is_toxic_expiry:
             tg_lines.append(f"• [NO TRADES] Toxic Expiry Lock (DTE: {days_to_expiry})")
-        elif not sniper_picks:
+        elif not execution_picks:
             tg_lines.append("• [NO TRADES] No candidates qualified")
         else:
-            rank_labels_tg = {0: "R1", 1: "R3"}
-            for idx, (r, qty) in enumerate(sniper_picks):
-                tg_lines.append(f"{idx+1}. <b>{r['stockname']}</b> — {rank_labels_tg.get(idx,'?')} @ 1x (Rs {r['pred_pnl']:,.0f})")
+            for idx, r in enumerate(execution_picks, 1):
+                tg_lines.append(f"🔥 <b>BUY 1x: {r['stockname']}</b> (Rs {r['pred_pnl']:,.0f})")
 
         tg_lines.append("")
         tg_lines.append("💡 <b>Top Candidates:</b>")
