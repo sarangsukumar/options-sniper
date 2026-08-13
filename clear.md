@@ -49,15 +49,10 @@ If a researcher or team member explicitly needs to re-run the entire 7.5-year hi
 
 **Warning:** Due to the database purge on Aug 5, 2026, a fresh rebuild will look slightly different than the `CLEAN_REFERENCE` baseline. It is recommended for R&D purposes only, NOT for overwriting production tracking.
 
-**Step 1: Regenerate Base ML Caches**
+**Step 1: Regenerate Base ML Caches & Walk-Forward**
 ```bash
 cd historical_models/
-python3 ensemble_model.py
+chmod +x rebuild_historical_caches.sh
+./rebuild_historical_caches.sh
 ```
-*(This rebuilds the raw `.pkl` prediction scores for all F&O stocks across history. Ensure `REMOVE_EXTREME_TRAINING_LOSSES = False` inside the script before running).*
-
-**Step 2: Run the Dynamic Threshold Walk-Forward**
-```bash
-python3 dynamic_threshold.py
-```
-*(This processes the raw `.pkl` cache through the threshold logic, generating a new `output/trades_dynamic_threshold.csv` that evaluates the model's historical edge).*
+*(This rebuilds the raw `.pkl` prediction scores for all frequencies and processes them through the walk-forward logic. The script has been hard-coded to `REMOVE_EXTREME_TRAINING_LOSSES=False` to perfectly match your baseline).*
