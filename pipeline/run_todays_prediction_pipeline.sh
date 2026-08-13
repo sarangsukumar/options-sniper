@@ -59,6 +59,15 @@ else
     exit 1
 fi
 
+# Step 4: Insert Predictions to Live Database (Python)
+echo -e "\n🚀 [STEP 4/4] Inserting Orders to Live Database (markets.orders)..."
+if python3 pipeline/insert_live_orders.py; then
+    echo "✔ Step 4 completed successfully."
+else
+    echo "❌ Error: Step 4 (Live Order Insertion) failed."
+    exit 1
+fi
+
 echo -e "\n========================================================================="
 echo "🎉 Pipeline execution finished successfully!"
 echo "Completed at: $(date)"
