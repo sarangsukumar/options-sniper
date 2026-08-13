@@ -24,8 +24,16 @@ echo "Started at: $(date)"
 echo "Working Directory: $PARENT_DIR"
 echo "========================================================================="
 
+# Step 0: Merge yesterday's actual trade results into master files
+echo -e "\n🔀 [STEP 0/4] Merging Yesterday's Actual PnL into Master Files..."
+if python3 pipeline/merge_actuals.py; then
+    echo "✔ Step 0 completed successfully."
+else
+    echo "⚠️  Warning: Step 0 (merge_actuals) encountered an error — continuing anyway."
+fi
+
 # Step 1: Run ICICI Daily Downloader (Node.js)
-echo -e "\n🚀 [STEP 1/3] Fetching Live Ticks & Daily Gap Details..."
+echo -e "\n🚀 [STEP 1/4] Fetching Live Ticks & Daily Gap Details..."
 if node pipeline/6.icici_daily_intraday_and_gap.js; then
     echo "✔ Step 1 completed successfully."
 else
@@ -34,7 +42,7 @@ else
 fi
 
 # Step 2: Compute Live Intraday Features (Python)
-echo -e "\n🚀 [STEP 2/3] Computing Live Intraday Features..."
+echo -e "\n🚀 [STEP 2/4] Computing Live Intraday Features..."
 if python3 pipeline/compute_f11_intraday_features_update.py; then
     echo "✔ Step 2 completed successfully."
 else
@@ -43,7 +51,7 @@ else
 fi
 
 # Step 3: Run Walk-Forward Retraining & Predictions (Python)
-echo -e "\n🚀 [STEP 3/3] Running Walk-Forward Predictions..."
+echo -e "\n🚀 [STEP 3/4] Running Walk-Forward Predictions..."
 if python3 predict_today.py --retrain-freq ensemble; then
     echo "✔ Step 3 completed successfully."
 else
