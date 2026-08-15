@@ -8,9 +8,9 @@ The core underlying ML engine successfully predicts the correct stock and output
 ---
 
 ### 🕒 STEP 1: Capture the Anchor Price (F1 Tick)
-At exactly **15:20 IST** (the designated trade entry window), your system must pull the Live Market Price (LMP) of the **Current Month Futures Contract (F1)** for the predicted stock.
+At exactly **15:25 IST** (just before the 15:26 target entry minute), your system must pull the Live Market Price (LMP) of the **Current Month Futures Contract (F1)** for the predicted stock.
 * **Why F1 and not Equity Spot?** The Futures price represents the true cost-of-carry forward price. Options are mathematically priced off the forward curve, making the F1 price the most accurate anchor for strike selection.
-* **Example:** `ADANIENT` ML prediction triggers. At 15:20, `ADANIENT` F1 is trading at `₹3,142.60`.
+* **Example:** `ADANIENT` ML prediction triggers. At 15:25, `ADANIENT` F1 is trading at `₹3,142.60`.
 
 ---
 
