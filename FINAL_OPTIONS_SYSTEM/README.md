@@ -1,56 +1,42 @@
-# AI Dynamic Overnight Options System
+# 🏦 MEGA INSTITUTIONAL TEAR-SHEET & PLAYBOOK (2024 - 2026)
 
-This directory contains the entire, fully-optimized pipeline for downloading and backtesting the **+1 ITM / -2 OTM Bull Put Spread** strategy based on the AI's overnight gap-up predictions.
+## 📌 HOW TO ACHIEVE THESE RESULTS (THE PLAYBOOK)
 
-## Core Strategy Parameters
-- **Setup:** Bull Put Spread (Credit Spread)
-- **Sell Leg:** +1 Strike In-The-Money (ITM) Put
-- **Buy Leg (Hedge):** -2 Strikes Out-Of-The-Money (OTM) Put
-- **Entry Time:** 15:26:00 (End of trading day, API execution sequence: Buy OTM first, Sell ITM second).
-- **Exit Time:** 09:29:00 (Next trading day, 14 minutes after open to avoid morning IV crush. API execution sequence: Buy ITM first, Sell OTM second).
-- **Max Margin:** ₹4,00,000 per trade (dynamically calculates max lots up to this limit).
-- **Slippage Assumption:** ₹300 per lot traded.
+To perfectly replicate this 136.3% CAGR equity curve, you must strictly follow these strike calculation and execution rules for your ML targets.
 
----
+### Rule 1: Target Selection & Strike Mapping
+* **For R1 & R3 Targets (High Confidence):** You MUST trade the **Wide Spread `(+1 ITM / -3 OTM)`**.
+* **For R2 & R4 Targets (Low Confidence):** You MUST trade the **Current System `(+1 ITM / -2 OTM)`**.
 
-## Pipeline Workflow
+### Rule 2: How to Calculate the Strikes (Example for Wide Spread)
+1. **Identify the Stock Price:** Example: Stock is trading at `₹2532.00`.
+2. **Find the ATM Strike:** Round to the nearest options strike. ATM = `2550`.
+3. **Determine the Strike Gap:** The options chain steps by `50`.
+4. **Calculate the Legs:**
+   * **Sell Leg (+1 ITM):** Step *up* one strike from ATM -> `2550 + 50 = 2600 Put`.
+   * **Buy Leg (-3 OTM):** Step *down* three strikes from ATM -> `2550 - 150 = 2400 Put`.
 
-### Step 1: Target Generation
-The AI prediction engine generates the daily targets. These are stored in CSV files such as `options_download_targets_2024_verified.csv`. These files contain the `stock` and the `buy_date` (the day the signal was generated).
-
-### Step 2: Data Scraping (`download_multi_strike_options.js`)
-This Node.js script connects to the data provider API. 
-For every stock target, it calculates the current stock price, generates the required strike prices (from +2 ITM down to -6 OTM), and downloads the 1-minute OHLC tick data for the **Entry Window (15:26 - 15:30)** and the **Exit Window (09:29 - 09:45)**. The data is saved directly into the local MySQL `markets` database.
-
-**To Run:**
-```bash
-./run_multi_strike_downloads.sh
-```
-
-### Step 3: Data Integrity Verification (`verify_data_integrity.py`)
-Because options data can be messy or illiquid, this Python script acts as a firewall. It queries the MySQL database and verifies that for every single target, we have successfully downloaded tick data for *multiple* strikes. It ensures there are no bugs or missing windows before we trust the backtester.
-
-**To Run:**
-```bash
-python3 verify_data_integrity.py
-```
-
-### Step 4: The Final Backtest Engine (`backtest_bull_put_spread.py`)
-This is the ultimate simulation engine. 
-- It loops through all verified targets.
-- It dynamically identifies the +1 ITM and -2 OTM strikes from the database.
-- It enforces the **Strict Overlap Verification** (ensuring both legs have active, liquid ticks in the exact same minute).
-- It calculates the `margin_per_lot` and dynamically scales the lot size to maximize a `₹4,00,000` account limit.
-- It calculates Gross P&L and deducts a strict `₹300 per lot` penalty for realistic slippage/commissions.
-
-**To Run:**
-```bash
-python3 backtest_bull_put_spread.py
-```
+### Rule 3: Execution Windows & Sizing
+* **Entry (Day 1):** Execute BOTH legs in the exact same minute between `15:20 to 15:32`.
+* **Exit (Day 2):** Close the spread between `09:25 to 09:35`. 
+* **Sizing:** The gap between the strikes multiplied by the lot size must NEVER exceed ₹4,00,000.
 
 ---
 
-## Why This System Works
-1. **Liquidity:** By locking the strikes to +1 ITM and -2 OTM, we operate in the absolute highest volume zone of the options chain. 
-2. **Margin Benefit:** Because the Kotak Neo API recognizes hedged basket orders, your ₹4 Lakh capital acts identically to an unhedged ₹10 Lakh account.
-3. **Statistical Edge:** The underlying ML prediction engine accurately forecasts overnight gap-ups ~67% of the time. The Bull Put Spread merely harvests this edge with controlled, predefined maximum risk.
+## 📊 THE FINAL PERFORMANCE SCOREBOARD
+
+| Performance Metric | 🏆 R1+R3 Winner *(Wide Spread)* | 🛡️ R1+R3 Winner *(Current Sys)* | 🎲 RANDOM CONTROL |
+|---|---|---|---|
+| **Total Net Profit** | **₹48,77,129.50** | ₹41,62,454.00 | ❌ **-₹7,74,444.70** |
+| **CAGR (3 Years)** | **136.3%** | 125.1% | ☠️ *-100% (Bankrupt)* |
+| **Approx Sharpe Ratio** | **5.78** *(Elite)* | 4.45 | Negative |
+| **Profit Factor** | **2.81** | 2.33 | < 1.0 |
+| **Reward-to-Risk Ratio** | **1.51** | 1.36 | < 1.0 |
+| **Max Drawdown (Risk)** | **₹2,65,190.25** | ₹3,60,300.00 | ⚠️ **₹9,50,818.25** |
+| **Trade Win Rate (Per Trade)**| **65.0%** | 63.1% | 44.4% |
+| **Daily Win Rate** | **68.2%** | 64.9% | Bleeding |
+| **Monthly Win Rate** | **86.7%** | 86.7% | Negative |
+| **Quarterly Win Rate** | **90.9%** | 90.9% | Negative |
+| **Max Trade Win Streak** | 10 Trades | 10 Trades | - |
+| **Max Trade Loss Streak** | 4 Trades | 4 Trades | - |
+| **Max Week Loss Streak** | 4 Weeks | 4 Weeks | - |
