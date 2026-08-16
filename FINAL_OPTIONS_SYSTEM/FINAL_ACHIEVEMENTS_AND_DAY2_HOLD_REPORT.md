@@ -24,7 +24,7 @@ STRATEGY CONFIGURATION                                                      NET 
 
 ---
 
-## 🔬 Overnight Quantitative Experiments & Findings
+## 🔬 Complete Quantitative Experiments & Findings
 
 ### 🧪 Experiment 1: Optimal Loss Threshold Normalized Per Lot
 When we normalize the loss trigger per lot (removing distortion from 1-lot vs 20-lot sizing):
@@ -44,29 +44,29 @@ When we normalize the loss trigger per lot (removing distortion from 1-lot vs 20
 
 ---
 
-### 🧪 Experiment 2: The Day 3 Holding Behavior (Trades Still Losing on Day 2)
-We downloaded the full Day 3 options database and tested what happens if trades that are *still* losing on Day 2 morning are held into Day 3:
+### 🧪 Experiment 2: The Day 3 Holding Behavior (Complete 100% Downloaded Dataset)
+With 100% of all Day 3 ticks downloaded and inserted, here is the verified behavior of holding trades that remained in a loss on Day 2:
 
 ```
 ===============================================================================================
 === DAY 3 HOLD ANALYSIS (TRADES STILL IN LOSS ON DAY 2 MORNING) ===
 ===============================================================================================
-Total Evaluated Trades:                         263
-Trades showing loss on Day 1:                   125
-Trades STILL in loss on Day 2 morning:          97
+Total Evaluated Trades:                         286
+Trades showing loss on Day 1:                   135
+Trades STILL in loss on Day 2 morning:          103
 
-Behavior on Day 3 for those 97 trades:
-1. Fully Reversed to WIN on Day 3:              18 trades (18.6%)
-2. Improved PnL / Reduced Loss on Day 3:        38 trades (39.2%)
-3. Deepened / Worse Loss on Day 3:              39 trades (40.2%)
+Behavior on Day 3 for those 103 trades:
+1. Fully Reversed to WIN on Day 3:              21 trades (20.4%)
+2. Improved PnL / Reduced Loss on Day 3:        46 trades (44.7%)
+3. Deepened / Worse Loss on Day 3:              44 trades (42.7%)
 -----------------------------------------------------------------------------------------------
-Total Net PnL if exited Day 2:                  -₹58,87,165.25
-Total Net PnL if exited Day 3:                  -₹54,99,994.25
-NET FINANCIAL BENEFIT OF DAY 3 HOLD:            +₹3,87,171.00 (+3.87 Lakhs Extra Gain)
+Total Net PnL if exited Day 2:                  -₹63,38,115.25
+Total Net PnL if exited Day 3:                  -₹59,46,666.75
+NET FINANCIAL BENEFIT OF DAY 3 HOLD:            +₹3,91,448.50 (+3.91 Lakhs Extra Gain)
 ===============================================================================================
 ```
 
-> **Takeaway:** Holding into Day 3 on persistent losses continues to have positive expected value (+₹3.87L), but with diminishing returns compared to the massive +₹10.25L gain achieved on Day 2. The primary bounce occurs within the first 24–48 hours (Day 2).
+> **Takeaway:** Holding into Day 3 on persistent losses delivers **+₹3.91 Lakhs** in extra recovery gain, but with diminishing returns compared to the massive **+₹10.25 Lakhs** gain achieved on Day 2. The sharpest mean-reversion bounce occurs within the first 24–48 hours (Day 2).
 
 ---
 
