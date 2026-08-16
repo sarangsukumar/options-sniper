@@ -1,4 +1,6 @@
-# 🚀 MASTER STRATEGY REPORT: FULL PORTFOLIO PERFORMANCE, MULTI-DAY HOLD OPTIMIZATION & PRODUCTION RULES
+# 🚀 MASTER STRATEGY PLAYBOOK: FULL PORTFOLIO, MULTI-DAY HOLD & REPRODUCIBILITY GUIDE
+## Institutional Options Trading Engine: From ₹4 Lakhs to ₹84+ Lakhs
+
 **Date:** August 16, 2026  
 **Strategy Type:** Quantitative Bull Put Credit Spread (`+1 ITM Sell / -2 OTM Buy`)  
 **Target Candidates:** ML Model Top Predictors Strictly (**Rank 1 & Rank 3 Elite Picks**)  
@@ -18,8 +20,8 @@ OFFICIAL INSTITUTIONAL TEARSHEET (R1 + R3 ELITE PICKS)
 ==================================================================================================
 Initial Capital Allocation per Trade:               ₹4,00,000.00
 Total Completed Trades:                             288 trades
-Winning Trades:                                     156 (54.17% Win Rate)
-Losing Trades:                                      132 (45.83% Loss Rate)
+Winning Trades:                                     156 (54.17% Net Win Rate)
+Losing Trades:                                      132 (45.83% Net Loss Rate)
 Scratch Trades:                                     0 (0.00%)
 --------------------------------------------------------------------------------------------------
 Total Gross Profits:                                ₹96,88,364.25
@@ -50,7 +52,35 @@ Annualized Sharpe Ratio:                            1.05
 
 ---
 
-## 🔬 Part 2: Multi-Day Holding Experiments & Alpha Discovery
+## 🔍 Part 2: Understanding Win Rate in Bull Put Spreads (Gross vs. Net)
+
+A common question is: *"Why is the Net Win Rate ~54.2% when pure market direction is over 63%?"*
+
+### 1. The Mathematical Mechanics of Win Rate in Spreads:
+* **Entry (Day 0 at 15:26):** We sell the `+1 ITM Put` and buy the `-2 OTM Put`, collecting an upfront net credit:
+  $$\text{Net Credit} = \text{Price}(\text{Sell Put}) - \text{Price}(\text{Buy Put})$$
+* **Exit (Day 1 at 09:25):** We buy back the spread at market open:
+  $$\text{Net Debit} = \text{Price}(\text{Sell Put}) - \text{Price}(\text{Buy Put})$$
+* **Gross Market PnL:** $(\text{Net Credit} - \text{Net Debit}) \times \text{Lot Size} \times \text{Lots}$
+* **Net PnL (True Production):** $\text{Gross PnL} - (\text{Commissions: ₹300 per lot} \times 2 \text{ legs})$
+
+### 2. The Two Drivers of the 54% vs 63% Number:
+1. **The ₹600/Lot Brokerage Drag on Small Moves:**
+   - In pure gross terms (before fees), the market direction win rate is **~61.5% to 64.0%**.
+   - However, when a trade makes a small gross market profit (e.g. +₹2,000 on 10 lots), after deducting ₹6,000 in brokerage fees, it registers as a net scratch/loss. We only count **`Net PnL > 0`** as a true win.
+2. **Strike Choice (`-2 OTM` vs `-3 OTM`):**
+   - The `-3 OTM` spread collects slightly more upfront premium (yielding ~63% win rate), but requires more margin per lot, capping trade volume at ~10–12 lots.
+   - The `-2 OTM` spread cuts margin per lot in half, allowing us to trade up to the **full 20 lots**. Even though win rate is 54.2%, the **total profit nearly doubled** because the winners make **+₹62,104 on average**!
+
+### 3. Payoff Ratio is King:
+* **Average Win:** **+₹62,104.90**
+* **Average Loss:** **-₹38,583.18**
+* **Payoff Ratio:** **1.61 : 1**
+* **Result:** Every 100 trades generates **+₹15,95,620.00 in pure positive expectancy**!
+
+---
+
+## 🔬 Part 3: Multi-Day Holding Experiments & Alpha Discovery
 
 ### 🧪 Experiment 1: Optimal Loss Threshold Normalized Per Lot
 When we normalize the loss trigger per lot (removing distortion from 1-lot vs 20-lot sizing):
@@ -66,7 +96,7 @@ When we normalize the loss trigger per lot (removing distortion from 1-lot vs 20
 | **Loss worse than ₹5,000 / lot** | 14 | 14.3% | 57.1% | ₹44,97,415.75 | **+₹9,27,600.00** |
 | **Loss worse than ₹10,000 / lot** | 3 | 33.3% | 100.0% | ₹43,86,725.75 | **+₹8,16,910.00** |
 
-> **Key Takeaway:** Triggering Day 2 holding **only when an open position is down worse than ₹3,000 / lot** generates **+₹10,25,569.00 in pure extra profit** while keeping 75% of losing trades moving fast on Day 1.
+> **Key Rule Discovery:** Triggering a Day 2 hold only when an open position has an unrealized loss **worse than ₹3,000 per lot** adds over **+₹10.25 Lakhs** in pure profit while keeping margin free on 75% of losing trades!
 
 ---
 
@@ -96,7 +126,7 @@ NET FINANCIAL BENEFIT OF DAY 3 HOLD:            +₹3,91,448.50 (+3.91 Lakhs Ext
 
 ---
 
-## 📖 Part 3: Step-by-Step Implementation & Reproducibility Guide
+## 📖 Part 4: Step-by-Step Implementation & Reproducibility Guide
 
 ### 💰 1. Capital Allocation & Lot Sizing Rules
 1. **Capital per Trade:** The system allocates a hard margin block of **₹4,00,000** per signal.
@@ -158,7 +188,7 @@ graph TD
 
 ---
 
-## 💻 Part 4: Reproduction Scripts & Codebase Architecture
+## 💻 Part 5: Reproduction Scripts & Codebase Architecture
 
 To re-run and reproduce these exact numbers on your local machine:
 
