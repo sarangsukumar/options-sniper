@@ -29,14 +29,14 @@ const ACCOUNT_CONFIGS = {
         name: "Amrit",
         appKey: "77059JQ7633PoSc1mk465580B6wp1x04",
         appSecret: "6P9^377d3*412585q(527i3ZgJ437040",
-        sessionFile: path.join(parentDir, 'auth', 'icicisession.txt'),
+        sessionFile: "/home/ubuntu/KotakCodes1/ICICI/icici_session_token/icicisession_amrit.txt",
         otpScript: path.join(parentDir, 'auth', '2.OTP_Amrit.py')
     },
     Manisha: {
         name: "Manisha",
         appKey: "1f3Pi887R1652C91_76J6808z8191jq~",
         appSecret: "4d7(89!0_3~8+11%49J38+g340k99n2~",
-        sessionFile: path.join(parentDir, 'auth', 'icicisession_Manisha.txt'),
+        sessionFile: "/home/ubuntu/KotakCodes1/ICICI/icici_session_token/icicisession_manisha.txt",
         otpScript: path.join(parentDir, 'auth', '2.OTP_Manisha.py')
     }
 };

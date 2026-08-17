@@ -141,3 +141,28 @@ At this threshold, entering the Reversal Bear Put Spread (Buy ATM / Sell -2 OTM)
 
 **Final Rule for Reversals:** 
 Do not reverse on minor losses. Only trigger the Stop-and-Reverse Bear Spread if the Day 1 loss is worse than **-₹5,000 per lot**. Otherwise, simply close the trade for a loss and preserve your core ₹45.6 Lakh system.
+
+---
+
+## ⚠️ Part 6: CRITICAL LIVE PRODUCTION FIX (STRIKE STEP SIZES)
+
+### The Hardcoded Step Size Bug in Historical Data
+During the transition to the live production script (`send_options_orders.py`), we uncovered a minor flaw in how the historical backtester (`backtest_experiment.py` and `download_multi_strike_options.js`) calculated strike step sizes.
+
+The backtester used a **hardcoded heuristic table** to guess the step size based on the stock's price:
+```python
+    if buy_price > 2500: step = 50
+    elif buy_price > 1000: step = 20
+    # ...
+```
+**The Problem:** This table is not always accurate for all stocks. For example, **GRASIM** was trading at ~₹3,400. The hardcoded logic assigned it a step size of **50**. However, the *actual* NSE option chain for GRASIM uses a step size of **20**. Because of this, the historical backtester was fetching strikes like 3450, 3400, 3350, instead of the real 3420, 3400, 3380.
+
+### The Live Production Solution
+To ensure the live trading bot NEVER selects an invalid strike, we completely removed the hardcoded table from `send_options_orders.py`.
+
+Instead, the live script now **infers the true step size dynamically directly from the live ICICI Option Chain**:
+1. It fetches all available strikes for the active expiry.
+2. It calculates the difference between consecutive strikes.
+3. It uses the most common difference as the definitive `step` size.
+
+This guarantees mathematically perfect `+1 ITM` and `-3 OTM` strike selections in real-time, regardless of the stock!
