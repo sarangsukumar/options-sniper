@@ -1,4 +1,4 @@
-# 🚀 MASTER STRATEGY PLAYBOOK: FROM ₹4 LAKHS TO ₹46.5+ LAKHS
+# 🚀 MASTER STRATEGY PLAYBOOK: FROM ₹4 LAKHS TO ₹61.7+ LAKHS (TRUE LIVE-VALIDATED)
 ## Quantitative Bull Put Spread Engine — Full Reproducibility Guide
 
 **Last Updated:** August 17, 2026
