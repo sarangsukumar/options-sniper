@@ -272,3 +272,49 @@ Script: `true_live_backtest.py`
 
 > **The system is fully validated end-to-end. Backtest and live trading are now in complete parity.**
 
+---
+
+## 🛡️ Part 8: EXECUTION SLIPPAGE & STRESS TESTING
+
+To ensure the strategy does not rely on "perfect" unrealistic executions, we ran two brutal stress tests on the final 322 trades using absolute tick-level data.
+
+### 1. The 2-Tick Slippage Penalty
+We simulated a scenario where every single order execution experiences a flat 2-tick (₹0.10) penalty against the standard Close/Open price.
+- **Entry:** Collect ₹0.10 less on the short put, pay ₹0.10 more on the long put.
+- **Exit:** Pay ₹0.10 more to buy back, receive ₹0.10 less when selling back.
+- **Total Friction:** A massive ₹0.40 total penalty per spread (8 ticks round-trip).
+
+### 2. The OHLC Absolute Worst-Case
+We simulated buying at the exact `HIGH` of the minute candle and selling at the exact `LOW` of the minute candle. This is the absolute mathematical floor of execution quality.
+
+### 📊 Stress Test Results (2024–2026)
+
+| Metric | Realistic (Close/Open) | 2-Tick Slippage | OHLC Worst-Case |
+|--------|------------------------|-----------------|-----------------|
+| **Total PnL** | ₹59.17 Lakhs | ₹48.62 Lakhs | ₹41.56 Lakhs |
+| **Trade Win Rate** | 61.8% | 59.6% | 57.1% |
+| **Monthly Win Rate** | 86.7% | 86.7% | 86.7% |
+| **Quarterly Win Rate** | 100% | 100% | 100% |
+| **Avg Monthly PnL** | ₹1.97 Lakhs | ₹1.62 Lakhs | ₹1.38 Lakhs |
+
+**Conclusion on Slippage:** 
+Even under the absolute worst execution conditions (OHLC Low/High bounds), the system generates **₹41.5 Lakhs** with the exact same **86.7% Monthly Win Rate**. The predictive alpha of the ML model is so large that it effortlessly absorbs massive execution friction.
+
+---
+
+## ⏱️ Part 9: OPTIMAL SQUARE-OFF TIMING & API ARCHITECTURE
+
+### The Ideal Exit Time Experiment
+We tested the strategy's profitability by simulating the morning square-off at various times. Exiting at the bell (09:16) was the worst outcome due to wide bid/ask spreads (only ₹40L PnL).
+
+Profitability peaks exactly at **09:30 AM** (₹53.1 Lakhs). By 09:30, the overnight IV crush is complete, and spreads have normalized. Holding past 09:35 starts introducing unnecessary intraday risk that decays profits.
+**Rule:** Target the 09:25–09:35 window, centering on 09:30 AM.
+
+### API Execution Order (Margin Safety)
+When squaring off the spread in the morning, the order of execution is mathematically critical to avoid Risk Management System (RMS) margin penalties.
+
+1. **FIRST:** Buy to close the Short Leg (`+1 ITM Put`).
+2. **SECOND:** Sell to close the Long Leg (`-3 OTM Put`).
+
+*If executing via algorithmic API (e.g., ICICI Breeze):*
+You **MUST wait for the filled/executed confirmation** of the Buy order before firing the Sell order. If you fire them concurrently and the Long leg executes a few milliseconds before the Short leg, you will temporarily hold an unhedged naked short put, resulting in an instant margin shortfall rejection from the broker.
