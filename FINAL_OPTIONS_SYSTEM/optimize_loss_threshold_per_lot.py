@@ -18,7 +18,7 @@ def generate_strikes(buy_price):
     step = get_strike_step(buy_price)
     atm = round(buy_price / step) * step
     strikes = [atm + step*i for i in range(2, -7, -1)]
-    return strikes[2], strikes[4]
+    return strikes[1], strikes[5]  # +1 ITM sell, -3 OTM buy (WIDE SPREAD)
 
 def get_price(cursor, stock, date, strike, mode):
     if mode == 'entry':
@@ -96,7 +96,7 @@ for _, row in r1_r3.iterrows():
     
     credit = se - be
     debit1 = sx1 - bx1
-    comm = 300 * lots * 2
+    comm = 200 * lots * 2  # ₹200/lot/leg = ₹400/lot round-trip (₹90 statutory + ₹310 slippage)
     pnl1 = ((credit - debit1) * lot_size * lots) - comm
     pnl1_per_lot = pnl1 / lots
     

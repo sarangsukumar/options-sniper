@@ -35,7 +35,7 @@ def generate_multi_strikes(buy_price):
         if s > 0: strikes.add(s)
     return sorted(list(strikes), reverse=True)
 
-def simulate_trade(stock, buy_date, buy_price, rank_type, margin_cap=400000, comm_per_lot=300):
+def simulate_trade(stock, buy_date, buy_price, rank_type, margin_cap=400000, comm_per_lot=400):
     cursor.execute("SELECT MIN(DATE(datetime)) as ed FROM scrapdata_options WHERE stock_code=%s AND DATE(datetime)>%s", (stock, buy_date))
     res = cursor.fetchone()
     if not res or not res['ed']: return None
@@ -48,19 +48,20 @@ def simulate_trade(stock, buy_date, buy_price, rank_type, margin_cap=400000, com
         
     # 1. Calculate Option Legs based on Target Rank Type
     strikes = generate_multi_strikes(buy_price)
-    if len(strikes) < 6: return None
+    if len(strikes) < 7: return None  # need index 5 for Wide Spread
     
     if rank_type in ['R1', 'R3']:
         sell_strike = strikes[1] # +1 ITM
-        buy_strike = strikes[5]  # -3 OTM (Wide Spread Winner)
+        buy_strike = strikes[5]  # -3 OTM (WIDE SPREAD — Original Winner: Sharpe 5.78, 86.7% monthly WR)
     else:
         sell_strike = strikes[1] # +1 ITM
-        buy_strike = strikes[4]  # -2 OTM (Current System Winner)
+        buy_strike = strikes[4]  # -2 OTM (R2+R4 Current System)
 
     lot_size = get_lot_size(stock, buy_date)
     margin_per_lot = (sell_strike - buy_strike) * lot_size
     if margin_per_lot <= 0 or margin_per_lot > margin_cap: return None
     lots = int(margin_cap // margin_per_lot)
+    lots = min(lots, 20)  # Hard cap to prevent NSE Quantity Freeze Limit rejection
     if lots == 0: return None
 
     # ENTRY: Pull wider window

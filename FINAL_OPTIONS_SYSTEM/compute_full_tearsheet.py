@@ -19,7 +19,7 @@ def generate_strikes(buy_price):
     step = get_strike_step(buy_price)
     atm = round(buy_price / step) * step
     strikes = [atm + step*i for i in range(2, -7, -1)]
-    return strikes[2], strikes[4]
+    return strikes[1], strikes[5]  # +1 ITM sell, -3 OTM buy (WIDE SPREAD)
 
 def get_price(cursor, stock, date, strike, mode):
     if mode == 'entry':
@@ -98,12 +98,12 @@ for _, row in r1_r3.iterrows():
     
     credit = se - be
     debit1 = sx1 - bx1
-    comm = 300 * lots * 2
+    comm = 200 * lots * 2  # ₹200/lot/leg = ₹400/lot round-trip (₹90 statutory + ₹310 slippage)
     pnl1 = ((credit - debit1) * lot_size * lots) - comm
     pnl1_per_lot = pnl1 / lots
     
     # Check if Day 2 hold is triggered: Loss worse than ₹3,000 / lot on safe non-expiry day
-    hold_triggered = (pnl1_per_lot <= -3000) and can_hold_d2
+    hold_triggered = (pnl1_per_lot <= -1000) and can_hold_d2
     
     if hold_triggered:
         sx2 = get_price(cursor, stock, day2_exit, sell_strike, 'exit')
@@ -175,7 +175,7 @@ roi = (net_pnl / initial_capital) * 100
 
 print("\n" + "="*80)
 print("=== INSTITUTIONAL TEARSHEET: FINAL PRODUCTION STRATEGY ===")
-print("=== (R1+R3, +1 ITM / -2 OTM, Max 20 Lots, Per-Lot Day 2 Hold Optimization) ===")
+print("=== (R1+R3, +1 ITM / -3 OTM WIDE SPREAD, Max 20 Lots, Per-Lot Day 2 Hold Optimization) ===")
 print("="*80)
 print(f"Total Completed Trades:         {total_trades}")
 print(f"Winning Trades:                 {win_count} ({win_rate:.2f}%)")
@@ -227,5 +227,36 @@ for y in [2024, 2025, 2026]:
 
 print("="*80)
 
+# Multi-timeframe Win Rate Calculation
+df_perf['buy_date'] = pd.to_datetime(df_perf['buy_date'])
+df_perf['day'] = df_perf['buy_date'].dt.strftime('%Y-%m-%d')
+df_perf['week'] = df_perf['buy_date'].dt.strftime('%Y-W%U')
+df_perf['month'] = df_perf['buy_date'].dt.strftime('%Y-%m')
+df_perf['quarter'] = df_perf['buy_date'].dt.to_period('Q').astype(str)
+
+def get_tf_stats(df, col_group):
+    grp = df.groupby(col_group)['final_pnl'].sum().reset_index()
+    tot = len(grp)
+    wins = (grp['final_pnl'] > 0).sum()
+    losses = (grp['final_pnl'] < 0).sum()
+    wr = (wins / tot) * 100 if tot > 0 else 0
+    return tot, wins, losses, wr
+
+d_tot, d_w, d_l, d_wr = get_tf_stats(df_perf, 'day')
+w_tot, w_w, w_l, w_wr = get_tf_stats(df_perf, 'week')
+m_tot, m_w, m_l, m_wr = get_tf_stats(df_perf, 'month')
+q_tot, q_w, q_l, q_wr = get_tf_stats(df_perf, 'quarter')
+
+print("\n" + "="*80)
+print("=== MULTI-TIMEFRAME WIN RATE SUMMARY ===")
+print("="*80)
+print(f"1. PER TRADE WIN RATE:   {win_rate:5.2f}% ({win_count} Wins / {loss_count} Losses out of {total_trades} Trades)")
+print(f"2. DAILY WIN RATE:       {d_wr:5.2f}% ({d_w} Win Days / {d_l} Loss Days out of {d_tot} Trading Days)")
+print(f"3. WEEKLY WIN RATE:      {w_wr:5.2f}% ({w_w} Win Weeks / {w_l} Loss Weeks out of {w_tot} Trading Weeks)")
+print(f"4. MONTHLY WIN RATE:     {m_wr:5.2f}% ({m_w} Win Months / {m_l} Loss Months out of {m_tot} Months)")
+print(f"5. QUARTERLY WIN RATE:   {q_wr:5.2f}% ({q_w} Win Quarters / {q_l} Loss Quarters out of {q_tot} Quarters)")
+print("="*80)
+
 cursor.close()
 db.close()
+
