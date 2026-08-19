@@ -41,3 +41,7 @@ These three filters **must** be verified in your execution code *before* a paylo
 * `live_execution_bot_template.py` - The Python logic framework enforcing these rules.
 * `DUAL_HYBRID_FINDINGS.md` - The master architectural breakdown of the strategy.
 * `Perfected_Quant_Tearsheet.md` - The mathematical breakdown of CAGR, Sharpe, and Win Rates for the system.
+
+### 4. The Gamma/Expiry Rollover Rule (DTE <= 2)
+* **Rule:** If the ML signal is generated 2 days or less before the current month's expiry date (e.g., on Wednesday or Thursday of expiry week), the bot MUST execute the option spread on the **Next Month's (Far Month)** contract instead of the Current Month.
+* **Why:** The backtest revealed that signals generated near expiry occasionally hold overnight past the actual expiry date (if gap_days > 1 due to holidays). Executing on a dying contract makes this physically impossible and exposes the portfolio to extreme Gamma risk. Rolling to the next month guarantees 30+ days of safety and prevents expiration assignment crossovers.
