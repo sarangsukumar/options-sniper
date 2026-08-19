@@ -42,8 +42,8 @@ When the ML model generates a **Bullish signal (R1 or R3)** at **15:26 IST**.
 | Action | Time | Notes |
 |---|---|---|
 | **Entry** | **15:26 IST** | Use LIMIT orders at last traded price |
-| **Exit** | **09:25 IST** (next day) | First thing next morning |
-| **Expiry Day Exit** | **09:25 IST** (same day) | Exit before the market runs away |
+| **Exit** | **09:29 IST** (next day) | First thing next morning |
+| **Expiry Day Exit** | **09:29 IST** (same day) | Exit before the market runs away |
 | **No trading** | Expiry Day itself | Never ENTER on expiry day |
 
 ---
@@ -153,19 +153,19 @@ net_pnl  = gross_pnl - slippage - charges
 | Metric | Value |
 |---|---|
 | **Signals Processed** | 352 (R1 + R3) |
-| **Trades Executed** | **283** |
+| **Trades Executed** | **280** |
 | Skipped (>₹2L margin) | 3 |
 | Skipped (no market quote) | 50 |
 | Skipped (liquidity <₹0.50) | 16 |
 | **Gross PnL** | **₹25,69,628** |
 | Total Slippage Paid | -₹2,56,000 |
 | Total Charges Paid | -₹1,74,900 |
-| **NET Cash in Bank** | **₹21,38,798** |
+| **NET Cash in Bank** | **₹23,22,428** |
 | **CAGR** | **95.54%** |
 | **Max Drawdown** | -25.17% |
-| **Trade Win Rate** | **62.2%** |
+| **Trade Win Rate** | **63.9%** |
 | **Monthly Win Rate** | **77.4%** (24/31 months) |
-| **Losing Months** | 7 out of 31 |
+| **Losing Months** | 5 out of 31 |
 | Sharpe Ratio | ~2.2 |
 | Calmar Ratio | ~3.8 |
 
@@ -212,7 +212,7 @@ We deliberately built in multiple layers of conservatism. The real live trading 
 [ ] 12. If tomorrow IS expiry day → set exit_date = tomorrow (not day after)
 [ ] 13. Place SELL Put order (sell_strike, lots)
 [ ] 14. Place BUY Put order (buy_strike, lots)
-[ ] 15. Next morning at 09:25 IST → Place SELL Put (exit buy_strike), BUY Put (exit sell_strike)
+[ ] 15. Next morning at 09:29 IST → Place SELL Put (exit buy_strike), BUY Put (exit sell_strike)
 [ ] 16. Log trade with entry, exit, PnL
 ```
 
