@@ -323,7 +323,21 @@ def main():
     # DTE GUARD (Strict 4 Business Day Minimum)
     business_days_left = np.busday_count(today_date, expiry_date)
     if business_days_left <= 4:
-        print(f"⚠️ DTE GUARD TRIGGERED: Only {business_days_left} business days left until expiry. Aborting to avoid theta crush.")
+        warning_msg = f"🔒 <b>DTE LOCK ACTIVATED</b> 🔒
+
+"
+        warning_msg += f"⏳ <b>Days to Expiry:</b> {business_days_left} Business Days
+"
+        warning_msg += f"📅 <b>Expiry Date:</b> {expiry_date.strftime('%d-%b-%Y')}
+
+"
+        warning_msg += "<i>Options trading is suspended for the remainder of the expiry cycle to prevent Theta Crush. Only Futures will execute.</i>"
+        
+        print(f"⚠️ DTE GUARD TRIGGERED: Only {business_days_left} business days left until expiry. Aborting.")
+        try:
+            send_telegram_notification(warning_msg)
+        except Exception as e:
+            print(f"Could not send telegram: {e}")
         return
 
 
