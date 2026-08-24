@@ -70,11 +70,12 @@ def init_breeze():
         return None
 
 
-def last_thursday_of_month(year, month):
+def last_tuesday_of_month(year, month):
     import calendar
     last_day = calendar.monthrange(year, month)[1]
     dt = datetime.date(year, month, last_day)
-    offset = (dt.weekday() - 3) % 7
+    # Weekday: Monday=0, Tuesday=1, Wednesday=2, Thursday=3
+    offset = (dt.weekday() - 1) % 7
     return dt - datetime.timedelta(days=offset)
 
 
@@ -113,12 +114,12 @@ def get_active_expiry():
             
     except Exception as e:
         print(f"⚠️ Falling back to manual expiry calculation: {e}")
-        expiry = last_thursday_of_month(today.year, today.month)
+        expiry = last_tuesday_of_month(today.year, today.month)
         if today > expiry:
             if today.month == 12:
-                expiry = last_thursday_of_month(today.year + 1, 1)
+                expiry = last_tuesday_of_month(today.year + 1, 1)
             else:
-                expiry = last_thursday_of_month(today.year, today.month + 1)
+                expiry = last_tuesday_of_month(today.year, today.month + 1)
 
     expiry_str = expiry.strftime('%Y-%m-%dT06:00:00.000Z')
     return expiry_str, expiry
