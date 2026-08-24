@@ -332,50 +332,54 @@ def main():
             print(f"  Skipping {stock} — no F1 price in Redis")
             continue
 
-        # Fetch live option chain (single call — reused for all checks)
-        chain_df = None
-
-        # Infer real step from live chain (not hardcoded table)
-        if chain_df is not None and not chain_df.empty:
-            spot_from_chain = float(chain_df['spot_price'].iloc[0] or f1_price)
-            step, atm_strike = infer_step_and_atm(chain_df, spot_from_chain)
-            print(f"  Spot={spot_from_chain}  Step={step}  ATM={atm_strike}")
-        else:
-            # Fallback: Parse ICICImaster_options.csv for true step size
-            step = get_step_size_from_master(stock)
-            if step is None:
-                # Absolute last resort
-                if f1_price <= 250:  step = 2.5
-                elif f1_price <= 1000: step = 5
-                elif f1_price <= 3000: step = 10
-                elif f1_price <= 6000: step = 50
-                else: step = 100
+        # Retrieve all available strikes directly from ICICImaster_options.csv
+        master_file = "/home/ubuntu/KotakCodes1/masterfile/ICICImaster_options.csv"
+        available_strikes = set()
+        try:
+            with open(master_file, "r") as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) >= 8 and parts[6] == stock:
+                        try:
+                            available_strikes.add(float(parts[7]))
+                        except ValueError:
+                            pass
+        except Exception as e:
+            print(f"⚠️ Error reading master CSV for {stock}: {e}")
             
-            atm_strike = step * round(f1_price / step)
-            print(f"  ⚠️ Chain unavailable. Master Fallback: F1={f1_price} Step={step} ATM={atm_strike}")
-
-        # Wide Spread strikes
-        sell_strike = atm_strike + (1 * step)    # +1 ITM (SHORT leg)
-        buy_strike  = atm_strike - (3 * step)    # -3 OTM (HEDGE leg)
-
-        lot_size       = lot_sizes.get(stock, 1)
-        margin_per_lot = (sell_strike - buy_strike) * lot_size
+        if len(available_strikes) < 4:
+            print(f"  Skipping {stock} — Not enough strikes found in master CSV.")
+            continue
+            
+        sorted_strikes = sorted(list(available_strikes))
         
-        # 2. Penny Stock Margin Trap Filter (>2L Reject)
-        if margin_per_lot > 200000:
-            print(f"  🔴 REJECT {stock}: Margin trap! One lot physical risk (₹{margin_per_lot}) exceeds ₹2,00,000.")
+        # 1. Find ATM Strike (closest to F1 price)
+        atm_strike = min(sorted_strikes, key=lambda x: abs(x - f1_price))
+        atm_index = sorted_strikes.index(atm_strike)
+        print(f"  Spot/F1={f1_price}  ATM={atm_strike}")
+        
+        # Ensure we have enough strikes below the ATM to select OTM-3
+        if atm_index < 3:
+            print(f"  Skipping {stock} — ATM is too low to go 3 strikes OTM.")
             continue
             
-        # 1. The Maximum Capital Cap (Volume Dial) - ₹2L cap
-        calc_lots = int(200_000 // margin_per_lot) if margin_per_lot > 0 else 0
-        lots = min(calc_lots, 20)
-        if lots < 1:
-            print(f"  🔴 REJECT {stock}: Can't afford even 1 lot within ₹2L cap.")
+        # 2. Assign Legs based on Index Positions (Historical Evaluation Update)
+        sell_strike = sorted_strikes[atm_index]      # ATM Strike (SHORT leg)
+        buy_strike  = sorted_strikes[atm_index - 3]  # -3 OTM (HEDGE leg)
+        
+        print(f"  Selected Strikes: Sell={sell_strike} (ATM), Buy={buy_strike} (-3 OTM)")
+
+        
+        lot_size = get_lot_size(None, stock)
+        
+        margin_per_lot = (sell_strike - buy_strike) * lot_size
+
+        # Position Sizing
+        total_qty, lots = calculate_position_size(stock, margin_per_lot, lot_size)
+        if total_qty == 0:
             continue
             
-        total_qty      = lots * lot_size
-        total_margin   = lots * margin_per_lot
-        strike_gap     = sell_strike - buy_strike
+        strike_gap = sell_strike - buy_strike
 
         msg += f"📈 <b>Stock:</b> {stock}\n"
 
@@ -396,7 +400,7 @@ def main():
         msg += f"🟩 <b>BUY</b>  {lots} Lots ({total_qty} Qty) {stock} <b>{buy_strike:g} PE</b> <i>(-3 OTM)</i> [LTP: {buy_ltp_str}]\n\n"
 
         msg += f"2️⃣ <b>SHORT SECOND (SELL after hedge):</b>\n"
-        msg += f"🟥 <b>SELL</b> {lots} Lots ({total_qty} Qty) {stock} <b>{sell_strike:g} PE</b> <i>(+1 ITM)</i> [LTP: {sell_ltp_str}]\n"
+        msg += f"🟥 <b>SELL</b> {lots} Lots ({total_qty} Qty) {stock} <b>{sell_strike:g} PE</b> <i>(ATM)</i> [LTP: {sell_ltp_str}]\n"
         msg += f"   <i>(Margin Blocked: ₹{total_margin:,.2f})</i>\n"
         msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         

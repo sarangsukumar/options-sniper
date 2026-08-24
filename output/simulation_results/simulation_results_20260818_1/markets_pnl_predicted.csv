@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-08-17,ABCAPITAL,399.75,400.2,3100,200.0,1194.9999999999648,Custom Limit Fill,Day 1,
+2026-08-17,ALKEM,5412.0,5417.5,125,200.0,487.5,Custom Limit Fill,Day 1,
+2026-08-17,DRREDDY,1183.7,1185.2,625,200.0,737.5,Custom Limit Fill,Day 1,
+2026-08-17,MPHASIS,2505.4,2480.0,275,200.0,-7185.0000000000255,Final Market Fill (at 0939),Day 1,

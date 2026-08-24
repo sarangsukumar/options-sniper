@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-08-19,DIXON,14501.0,14551.0,50,200.0,2300.0,Custom Limit Fill,Day 1,
+2026-08-19,JINDALSTEL,1112.4,1119.4,625,200.0,4175.0,Custom Limit Fill,Day 1,
+2026-08-19,NATIONALUM,384.3,393.25,1875,200.0,16581.249999999978,Custom Limit Fill,Day 1,
+2026-08-19,SBICARD,625.85,634.0,800,200.0,6319.999999999982,Custom Limit Fill,Day 1,
