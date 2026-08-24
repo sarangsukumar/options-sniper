@@ -368,18 +368,26 @@ def main():
         buy_strike  = sorted_strikes[atm_index - 3]  # -3 OTM (HEDGE leg)
         
         print(f"  Selected Strikes: Sell={sell_strike} (ATM), Buy={buy_strike} (-3 OTM)")
+    # -3 OTM (HEDGE leg)
 
-        
-        lot_size = get_lot_size(None, stock)
-        
+        lot_size       = lot_sizes.get(stock, 1)
         margin_per_lot = (sell_strike - buy_strike) * lot_size
-
-        # Position Sizing
-        total_qty, lots = calculate_position_size(stock, margin_per_lot, lot_size)
-        if total_qty == 0:
+        
+        # 2. Penny Stock Margin Trap Filter (>2L Reject)
+        if margin_per_lot > 200000:
+            print(f"  🔴 REJECT {stock}: Margin trap! One lot physical risk (₹{margin_per_lot}) exceeds ₹2,00,000.")
             continue
             
-        strike_gap = sell_strike - buy_strike
+        # 1. The Maximum Capital Cap (Volume Dial) - ₹2L cap
+        calc_lots = int(200_000 // margin_per_lot) if margin_per_lot > 0 else 0
+        lots = min(calc_lots, 20)
+        if lots < 1:
+            print(f"  🔴 REJECT {stock}: Can't afford even 1 lot within ₹2L cap.")
+            continue
+            
+        total_qty      = lots * lot_size
+        total_margin   = lots * margin_per_lot
+        strike_gap     = sell_strike - buy_strike
 
         msg += f"📈 <b>Stock:</b> {stock}\n"
 
