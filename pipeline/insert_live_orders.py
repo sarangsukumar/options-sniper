@@ -2,6 +2,7 @@
 import pandas as pd
 import pymysql
 import os
+import requests
 import csv
 from datetime import datetime
 
@@ -62,6 +63,17 @@ def is_expiry_day():
     expiry_date = get_active_expiry()
     return today >= expiry_date
 
+
+
+def send_telegram_notification(text):
+    try:
+        TELEGRAM_BOT_TOKEN = "5350311365:AAFkTUBR4IGvgS5Z9mJngz-mgk7-HkhFEYE"
+        TELEGRAM_CHAT_ID   = "-698073972"
+        url     = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': text, 'parse_mode': 'HTML'}
+        requests.post(url, data=payload, timeout=10)
+    except Exception as e:
+        print(f"Failed to send telegram: {e}")
 
 def main():
     print("="*60)
