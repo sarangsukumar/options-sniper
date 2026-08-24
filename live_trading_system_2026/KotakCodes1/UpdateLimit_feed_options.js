@@ -240,8 +240,8 @@ const pool = mysql.createPool(mysqlConfig);
                     if (['2', '3', '4'].includes(String(order.isvalid))) {
                         continue; // Already executed, skip
                     }
-                    if (currentLTPForLogic < 0.50) {
-                        console.log(`[REJECT] ${stockname} BUY Premium ${currentLTPForLogic} is < 0.50. Skipping!`);
+                    if (currentLTPForLogic < 1.00) {
+                        console.log(`[REJECT] ${stockname} BUY Premium ${currentLTPForLogic} is < 1.00. Skipping!`);
                         continue;
                     }
                     // Entry execution based on CLI arg
@@ -257,8 +257,8 @@ const pool = mysql.createPool(mysqlConfig);
                     if (['2', '3', '4'].includes(String(order.isvalid))) {
                         continue; // Already executed, skip
                     }
-                    if (currentLTPForLogic < 0.50) {
-                        console.log(`[REJECT] ${stockname} SELL Premium ${currentLTPForLogic} is < 0.50. Skipping!`);
+                    if (currentLTPForLogic < 1.00) {
+                        console.log(`[REJECT] ${stockname} SELL Premium ${currentLTPForLogic} is < 1.00. Skipping!`);
                         continue;
                     }
                     const buyLegForUser = orderStocks.find(o => o.stockname === stockname && o.USER === user && o.type === 'BUY');

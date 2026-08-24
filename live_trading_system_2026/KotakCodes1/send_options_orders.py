@@ -17,6 +17,7 @@ import requests
 import datetime
 import json
 import pandas as pd
+import numpy as np
 from breeze_connect import BreezeConnect
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
@@ -318,6 +319,12 @@ def main():
         print(f"⚠️ TODAY ({today_date}) IS EXPIRY DAY ({expiry_date})! Simulation rules mandate: NEVER ENTER ON EXPIRY DAY. Aborting all options trades.")
         return
 
+    # DTE GUARD (Strict 4 Business Day Minimum)
+    business_days_left = np.busday_count(today_date, expiry_date)
+    if business_days_left <= 4:
+        print(f"⚠️ DTE GUARD TRIGGERED: Only {business_days_left} business days left until expiry. Aborting to avoid theta crush.")
+        return
+
 
     msg  = f"🎯 <b>LIVE OPTIONS ORDER INFORMATION</b>\n"
     msg += f"📅 <b>Time:</b> {now_str} | <b>Expiry:</b> {expiry_date.strftime('%d-%b-%Y')}\n"
@@ -395,10 +402,10 @@ def main():
         buy_ltp = get_option_ltp_from_redis(stock, buy_strike, 'PE')
         sell_ltp = get_option_ltp_from_redis(stock, sell_strike, 'PE')
         
-        # 3. The ₹0.50 Premium Liquidity Floor
+        # 3. The ₹1.00 Premium Liquidity Floor
         # We NO LONGER reject here. We insert into DB, let Redis fetch it, and UpdateLimit_feed_options.js will reject it!
-        if buy_ltp and buy_ltp < 0.50 or sell_ltp and sell_ltp < 0.50:
-            print(f"  ⚠️ WARNING {stock}: Premium < 0.50 in Redis (Buy: {buy_ltp}, Sell: {sell_ltp}). Orchestrator will reject if live.")
+        if buy_ltp and buy_ltp < 1.00 or sell_ltp and sell_ltp < 1.00:
+            print(f"  ⚠️ WARNING {stock}: Premium < 1.00 in Redis (Buy: {buy_ltp}, Sell: {sell_ltp}). Orchestrator will reject if live.")
         
         buy_ltp_str = f"₹{buy_ltp:g}" if buy_ltp else "N/A"
         sell_ltp_str = f"₹{sell_ltp:g}" if sell_ltp else "N/A"
@@ -424,7 +431,7 @@ def main():
         check_lines.append(f"{'✅' if cap_ok else '❌'} Capital Cap (≤ ₹2L)")
         check_lines.append(f"{'✅' if lot_ok else '❌'} NSE Freeze Cap (≤ 20 Lots)")
         check_lines.append(f"✅ Margin Trap Filter (Risk: ₹{margin_per_lot}/lot)")
-        check_lines.append(f"✅ Premium Liquidity Floor (Both ≥ ₹0.50)")
+        check_lines.append(f"✅ Premium Liquidity Floor (Both ≥ ₹1.00)")
 
         # --- DATABASE INSERTION FOR AFTERNOON ENTRY (UNCONDITIONAL) ---
         try:
