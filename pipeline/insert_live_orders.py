@@ -76,6 +76,18 @@ def send_telegram_notification(text):
         print(f"Failed to send telegram: {e}")
 
 def main():
+
+    if is_expiry_day():
+        expiry_date = get_active_expiry()
+        warning_msg = f"🚫 <b>FUTURES EXPIRY LOCK ACTIVATED</b> 🚫\n\n"
+        warning_msg += f"📅 <b>Expiry Date:</b> {expiry_date.strftime('%d-%b-%Y')} (Today)\n\n"
+        warning_msg += "<i>Simulation rules mandate NO TRADING on Expiry Day.</i>\n"
+        warning_msg += "<i>No Futures predictions will be inserted into the live database. (Feature extraction completed normally for ML walk-forward continuity).</i>"
+        
+        print("⚠️ TODAY IS EXPIRY DAY! Aborting insertion of Futures orders.")
+        send_telegram_notification(warning_msg)
+        return
+
     print("="*60)
     print(" 🚀 INSERTING LIVE PREDICTIONS INTO MARKETS.ORDERS")
     print("="*60)

@@ -624,6 +624,50 @@ def score_all_candidates(test_df, bad_expiry):
     df_out['action'] = [b[1] for b in band_labels]
     return df_out
 
+
+def last_tuesday_of_month(year, month):
+    import calendar
+    import datetime
+    last_day = calendar.monthrange(year, month)[1]
+    dt = datetime.date(year, month, last_day)
+    offset = (dt.weekday() - 1) % 7
+    return dt - datetime.timedelta(days=offset)
+
+def get_active_expiry(today):
+    import re
+    try:
+        with open('/home/ubuntu/KotakCodes1/expiry_dates.txt', 'r') as f:
+            txt_content = f.read()
+        match = re.search(r'const expiryDatesList = "(.*)";', txt_content)
+        if not match:
+            raise ValueError("Regex failed to find expiryDatesList string")
+            
+        dates_str = match.group(1)
+        valid_dates = []
+        for d in dates_str.split(','):
+            try:
+                valid_dates.append(datetime.datetime.strptime(d.strip(), '%Y-%m-%d').date())
+            except:
+                pass
+                
+        valid_dates.sort()
+        future_expiries = [d for d in valid_dates if d >= today.date()]
+        
+        if future_expiries:
+            expiry = future_expiries[0]
+        else:
+            raise ValueError("No future expiry dates found in txt file")
+            
+    except Exception as e:
+        expiry = last_tuesday_of_month(today.year, today.month)
+        if today.date() > expiry:
+            if today.month == 12:
+                expiry = last_tuesday_of_month(today.year + 1, 1)
+            else:
+                expiry = last_tuesday_of_month(today.year, today.month + 1)
+    return expiry
+
+
 def send_incomplete_telegram_alert(today_dt, missing_reasons):
     """
     Sends a styled Telegram notification when today's run has incomplete feature data
@@ -1190,6 +1234,11 @@ def main():
         expiry_stats_all = train.groupby('days_to_expiry')['pnl'].mean()
         bad_expiry_champ = set(expiry_stats_all[expiry_stats_all < FILTER_THRESHOLD].index)
         is_toxic_expiry = (days_to_expiry in bad_expiry_champ)
+        
+        # Exact Expiry Day Guard
+        exact_expiry_date = get_active_expiry(today_dt)
+        is_exact_expiry_day = (today_dt.date() >= exact_expiry_date)
+        is_toxic_expiry = is_toxic_expiry or is_exact_expiry_day
 
         # ── 7B. F&O Banlist ────────────────────────────────────────────────────────
         ban_path = '/home/ubuntu/banlist/fo_ban_list_historical.csv'
@@ -1255,7 +1304,10 @@ def main():
         if is_friday_lock:
             print("   → [NO TRADES] Friday Lock is ACTIVE (no trades on Fridays)")
         elif is_toxic_expiry:
-            print(f"   → [NO TRADES] Toxic Expiry Lock ACTIVE (DTE: {days_to_expiry} is high-risk)")
+            if is_exact_expiry_day:
+                print(f"   → [NO TRADES] Final Expiry Day ACTIVE (No trading allowed)")
+            else:
+                print(f"   → [NO TRADES] Toxic Expiry Lock ACTIVE (DTE: {days_to_expiry} is high-risk)")
         elif not champion_picks:
             print("   → [NO TRADES] No stock candidates qualified today")
         else:
@@ -1361,7 +1413,10 @@ def main():
         if is_friday_lock:
             tg_lines.append("• [NO TRADES] Friday Lock Active")
         elif is_toxic_expiry:
-            tg_lines.append(f"• [NO TRADES] Toxic Expiry Lock (DTE: {days_to_expiry})")
+            if is_exact_expiry_day:
+                tg_lines.append(f"• [NO TRADES] Final Expiry Day (No trading allowed)")
+            else:
+                tg_lines.append(f"• [NO TRADES] Toxic Expiry Lock (DTE: {days_to_expiry})")
         elif not execution_picks:
             tg_lines.append("• [NO TRADES] No candidates qualified")
         else:
