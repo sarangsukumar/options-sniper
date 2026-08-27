@@ -51,7 +51,29 @@ async function run() {
     rawDb.connect();
     const db = { query: util.promisify(rawDb.query).bind(rawDb), end: util.promisify(rawDb.end).bind(rawDb) };
 
-    let symbolMap = {};
+    let symbolMap = {
+        'HINDCOPPER': 'HINCOP',
+        'M&MFIN': 'MAHFYN',
+        'BAJAJFINSV': 'BAFINS',
+        'BAJFINANCE': 'BAJFI',
+        'CHOLAFIN': 'CHOINV',
+        'HINDALCO': 'HINDAL',
+        'HINDUNILVR': 'HINLEV',
+        'LICHSGFIN': 'LICHF',
+        'MUTHOOTFIN': 'MUTFIN',
+        'SHRIRAMFIN': 'SHRTRA',
+        'TECHM': 'TECMAH',
+        'KOTAKBANK': 'KOTMAH',
+        'PERSISTENT': 'PERSYS',
+        'PAGEIND': 'PAGIND',
+        'PATANJALI': 'RUCSOY',
+        'PAYTM': 'ONE97',
+        'POLICYBZR': 'PBFINT',
+        'PFC': 'POWFIN',
+        'PGEL': 'PGELEC',
+        'M_M': 'MAHMAH',
+        'M&M': 'MAHMAH'
+    };
     const MASTER_CSV = path.join(parentDir, 'config', 'ICICImaster.csv');
     if (fs.existsSync(MASTER_CSV)) {
         let masterRows = fs.readFileSync(MASTER_CSV, 'utf8').split('\n');
