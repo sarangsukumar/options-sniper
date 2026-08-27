@@ -6,7 +6,7 @@ const util = require('util');
 const csv = require('csv-parser');
 
 const parentDir = path.dirname(__dirname);
-const TARGETS_CSV = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/FINAL_OPTIONS_SYSTEM/r1r3_next_expiry_strikes.csv';
+const TARGETS_CSV = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/FINAL_OPTIONS_SYSTEM/missing_data_download_tasks.csv';
 const appKey = "S945YmT9K3Z4425450K+C205BMZ9$085";
 const appSecret = "6P9^377d3*412585q(527i3ZgJ437040";
 const sessionFile = "/home/ubuntu/KotakCodes1/Bineesh_ICICI/icicisession.txt";
