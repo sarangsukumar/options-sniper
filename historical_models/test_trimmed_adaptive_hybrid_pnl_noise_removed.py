@@ -9,13 +9,15 @@ import numpy as np
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(_THIS_DIR, "output")
 
-# Set paths to lookahead-free noise-filtered predictions caches
+is_nf = os.getenv('REMOVE_EXTREME_TRAINING_LOSSES', 'False').lower() == 'true'
+suffix = "_nf.pkl" if is_nf else ".pkl"
+
 FILES = {
-    "Daily": "wf_predictions_cache_daily_da_standard_dl_3.0_nf.pkl",
-    "Weekly": "wf_predictions_cache_weekly_da_standard_dl_3.0_nf.pkl",
-    "Monthly": "wf_predictions_cache_monthly_da_standard_dl_3.0_nf.pkl",
-    "Quarterly": "wf_predictions_cache_quarterly_da_standard_dl_3.0_nf.pkl",
-    "Yearly": "wf_predictions_cache_yearly_da_standard_dl_3.0_nf.pkl"
+    "Daily": f"wf_predictions_cache_daily_da_standard_dl_3.0{suffix}",
+    "Weekly": f"wf_predictions_cache_weekly_da_standard_dl_3.0{suffix}",
+    "Monthly": f"wf_predictions_cache_monthly_da_standard_dl_3.0{suffix}",
+    "Quarterly": f"wf_predictions_cache_quarterly_da_standard_dl_3.0{suffix}",
+    "Yearly": f"wf_predictions_cache_yearly_da_standard_dl_3.0{suffix}"
 }
 
 def load_caches():
