@@ -53,7 +53,7 @@ async function run() {
 
     let symbolMap = {
         'HINDCOPPER': 'HINCOP',
-        'M&MFIN': 'MAHFYN',
+        'M&MFIN': 'MAHFIN',
         'BAJAJFINSV': 'BAFINS',
         'BAJFINANCE': 'BAJFI',
         'CHOLAFIN': 'CHOINV',
@@ -72,7 +72,18 @@ async function run() {
         'PFC': 'POWFIN',
         'PGEL': 'PGELEC',
         'M_M': 'MAHMAH',
-        'M&M': 'MAHMAH'
+        'M&M': 'MAHMAH',
+        'ABBOTINDIA': 'ABBIND',
+        'AARTIIND': 'AARIND',
+        'BALRAMCHIN': 'BALCHI',
+        'COROMANDEL': 'CORINT',
+        'DEEPAKNTR': 'DEENIT',
+        'ESCORTS': 'ESCORT',
+        'INDIAMART': 'INDMAR',
+        'IPCALAB': 'IPCLAB',
+        'JKCEMENT': 'JKCEM',
+        'NAVINFLUOR': 'NAVFLU',
+        'PVRINOX': 'PVR'
     };
     const MASTER_CSV = path.join(parentDir, 'config', 'ICICImaster.csv');
     if (fs.existsSync(MASTER_CSV)) {
