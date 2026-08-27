@@ -167,7 +167,7 @@ function fetchFromYahooFinance(stockName) {
         if (symbol === "NIFTY NEXT 50") symbol = "^NSMID_50";
         else symbol = `${symbol}.NS`;
 
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=3d`;
         
         https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
             let data = '';
@@ -184,12 +184,25 @@ function fetchFromYahooFinance(stockName) {
                     
                     let prevClose = meta.chartPreviousClose || null;
                     let todayOpen = null;
+                    let volChangePct = '0.000000';
                     
                     if (indicators && indicators.open && indicators.open.length > 0) {
                         todayOpen = indicators.open[indicators.open.length - 1];
                     }
                     
-                    resolve({ prevClose, todayOpen });
+                    if (indicators && indicators.volume && indicators.volume.length >= 2) {
+                        let volYesterday = indicators.volume[indicators.volume.length - 2];
+                        let volDayBefore = indicators.volume.length >= 3 ? indicators.volume[indicators.volume.length - 3] : null;
+                        
+                        if (volDayBefore && volDayBefore > 0 && volYesterday) {
+                            volChangePct = (((volYesterday - volDayBefore) / volDayBefore) * 100).toFixed(6);
+                        } else if (volYesterday && volYesterday > 0) {
+                            let volToday = indicators.volume[indicators.volume.length - 1];
+                            volChangePct = (((volToday - volYesterday) / volYesterday) * 100).toFixed(6);
+                        }
+                    }
+                    
+                    resolve({ prevClose, todayOpen, volChangePct });
                 } catch (e) {
                     resolve(null);
                 }
@@ -229,7 +242,7 @@ async function processAllGaps(stockList, scripCodes, todayStr, fromStr) {
             prevClose = yfRes.prevClose;
             
             const gapPct = ((todayOpen - prevClose) / prevClose * 100).toFixed(6);
-            const volChangePct = '0.000000';
+            const volChangePct = yfRes.volChangePct || '0.000000';
             newLines.push(`${todayStr},${stockName},${todayOpen},${prevClose},${gapPct},${volChangePct}`);
             stats.yahoo++;
             console.log(`[${index + 1}/${stockList.length}] ${stockName.padEnd(12)} | Open: ${todayOpen.toFixed(2).padStart(8)} | PrevClose: ${prevClose.toFixed(2).padStart(8)} | Gap: ${(gapPct + '%').padStart(8)} [SUCCESS - YAHOO PRIMARY]`);

@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-08-18,COFORGE,1776.3,1810.6,475,200.0,16092.499999999978,Custom Limit Fill,Day 1,
+2026-08-18,IDEA,14.18,14.2,71475,200.0,1229.4999999999695,Custom Limit Fill,Day 1,
+2026-08-18,INDIGO,5218.0,5196.5,150,200.0,-3425.0,Final Market Fill (at 0939),Day 1,
+2026-08-18,RBLBANK,383.7,381.6,3175,200.0,-6867.499999999892,Fallback/Standard Limit Fill,Day 1,

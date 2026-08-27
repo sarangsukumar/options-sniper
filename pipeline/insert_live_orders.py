@@ -2,6 +2,7 @@
 import pandas as pd
 import pymysql
 import os
+import requests
 import csv
 from datetime import datetime
 
@@ -9,7 +10,84 @@ SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR    = os.path.dirname(SCRIPT_DIR)
 PREDICTIONS_FILE = os.path.join(BASE_DIR, "output", "predictedstocksfortoday.csv")
 
+
+def last_tuesday_of_month(year, month):
+    import calendar
+    import datetime
+    last_day = calendar.monthrange(year, month)[1]
+    dt = datetime.date(year, month, last_day)
+    offset = (dt.weekday() - 1) % 7
+    return dt - datetime.timedelta(days=offset)
+
+def get_active_expiry():
+    import datetime
+    import re
+    today = datetime.datetime.utcnow().date() + datetime.timedelta(hours=5, minutes=30)
+    
+    try:
+        with open('/home/ubuntu/KotakCodes1/expiry_dates.txt', 'r') as f:
+            txt_content = f.read()
+        match = re.search(r'const expiryDatesList = "(.*)";', txt_content)
+        if not match:
+            raise ValueError("Regex failed to find expiryDatesList string")
+            
+        dates_str = match.group(1)
+        valid_dates = []
+        for d in dates_str.split(','):
+            try:
+                valid_dates.append(datetime.datetime.strptime(d.strip(), '%Y-%m-%d').date())
+            except:
+                pass
+                
+        valid_dates.sort()
+        future_expiries = [d for d in valid_dates if d >= today]
+        
+        if future_expiries:
+            expiry = future_expiries[0]
+        else:
+            raise ValueError("No future expiry dates found in txt file")
+            
+    except Exception as e:
+        print(f"⚠️ Falling back to manual expiry calculation: {e}")
+        expiry = last_tuesday_of_month(today.year, today.month)
+        if today > expiry:
+            if today.month == 12:
+                expiry = last_tuesday_of_month(today.year + 1, 1)
+            else:
+                expiry = last_tuesday_of_month(today.year, today.month + 1)
+    return expiry
+
+def is_expiry_day():
+    import datetime
+    today = datetime.datetime.utcnow().date() + datetime.timedelta(hours=5, minutes=30)
+    expiry_date = get_active_expiry()
+    return today >= expiry_date
+
+
+
+def send_telegram_notification(text):
+    try:
+        TELEGRAM_BOT_TOKEN = "5350311365:AAFkTUBR4IGvgS5Z9mJngz-mgk7-HkhFEYE"
+        TELEGRAM_CHAT_ID   = "-698073972"
+        url     = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': text, 'parse_mode': 'HTML'}
+        requests.post(url, data=payload, timeout=10)
+    except Exception as e:
+        print(f"Failed to send telegram: {e}")
+
 def main():
+
+    if is_expiry_day():
+        expiry_date = get_active_expiry()
+        warning_msg = f"🚫 <b>FUTURES EXPIRY LOCK ACTIVATED</b> 🚫\n\n"
+        warning_msg += f"📅 <b>Expiry Date:</b> {expiry_date.strftime('%d-%b-%Y')} (Today)\n\n"
+        warning_msg += "<i>Simulation rules mandate NO TRADING on Expiry Day.</i>\n"
+        warning_msg += "<i>No Futures predictions will be inserted into the live database. (Feature extraction completed normally for ML walk-forward continuity).</i>"
+        
+        print("⚠️ TODAY IS EXPIRY DAY! Aborting insertion of Futures orders.")
+        send_telegram_notification(warning_msg)
+        return
+
     print("="*60)
     print(" 🚀 INSERTING LIVE PREDICTIONS INTO MARKETS.ORDERS")
     print("="*60)
