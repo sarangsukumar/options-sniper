@@ -140,6 +140,7 @@ for otm_distance, default_premium in [(5, 0.40), (6, 0.25), (7, 0.15)]:
     trades_pnl = []
     wins = 0
     total_trades = 0
+    yearly_stats = {}
     
     for _, row in aarang_df.iterrows():
         stock = row['Stockname'].strip()
@@ -180,16 +181,25 @@ for otm_distance, default_premium in [(5, 0.40), (6, 0.25), (7, 0.15)]:
         entry_sell = raw_sell - PER_LEG_SLIPPAGE
         entry_buy = raw_buy + PER_LEG_SLIPPAGE
         
+        # Pre-resolve 10:30 AM OTM-3 Exit price (for afternoon hold references)
+        eb_1030 = None
+        for offset in range(6):
+            check_tm = f"10:{30 + offset:02d}:00"
+            val = get_tick(stock, sell_date, otm3, check_tm)
+            if val is not None:
+                eb_1030 = val
+                break
+        if eb_1030 is None:
+            eb_1030 = get_tick(stock, sell_date, otm3, "09:25:00")
+        buy_exit_price_1030 = eb_1030 if eb_1030 is not None else entry_buy
+        
         # Scan exit time of ATM Put Sell
         final_exit_sell = None
+        buy_exit_price = None
         exit_time = None
         exit_status = None
         
-        eb_1030 = get_tick(stock, sell_date, otm3, "10:30:00")
-        if eb_1030 is None: eb_1030 = get_tick(stock, sell_date, otm3, "09:25:00")
-        buy_exit_price = eb_1030 if eb_1030 is not None else entry_buy
-
-        # Determine exact exit minute of the ATM Put Sell
+        # Determine exact exit minute of the ATM Put Sell and OTM-3 Put Buy
         for h in range(9, 16):
             start_m = 16 if h == 9 else 0
             end_m = 16 if h == 15 else 60
@@ -197,14 +207,47 @@ for otm_distance, default_premium in [(5, 0.40), (6, 0.25), (7, 0.15)]:
                 tm = f"{h:02d}:{m:02d}:00"
                 es = get_tick(stock, sell_date, atm, tm)
                 
-                # Check target profit of combined pair (Put Sell + Put Buy (which squares off at 10:30))
-                pnl_curr = ((entry_sell - (es + PER_LEG_SLIPPAGE)) * total_qty) + (((buy_exit_price - PER_LEG_SLIPPAGE) - entry_buy) * total_qty) - charges if es is not None else -999999
-                if es is not None and pnl_curr > 0:
-                    final_exit_sell = es
-                    exit_time = tm
-                    exit_status = 'Target Hit'
-                    break
+                total_exit_mins = h * 60 + m
+                
+                if total_exit_mins <= (10 * 60 + 30):
+                    # Morning Rule: Check combined PnL using the exact same minute's tick for both legs! (Zero Look-ahead Bias!)
+                    eb = get_tick(stock, sell_date, otm3, tm)
+                    if es is not None and eb is not None:
+                        pnl_curr = ((entry_sell - (es + PER_LEG_SLIPPAGE)) * total_qty) + \
+                                   (((eb - PER_LEG_SLIPPAGE) - entry_buy) * total_qty) - charges
+                                   
+                        if pnl_curr > 0:
+                            final_exit_sell = es
+                            buy_exit_price = eb
+                            exit_time = tm
+                            exit_status = 'Target Hit'
+                            break
+                else:
+                    # Afternoon Rule: Check combined profit including the already locked-in OTM-3 close and cheap leg
+                    cheap_strike = atm - (otm_distance * step)
+                    cheap_entry_price = get_tick(stock, sell_date, cheap_strike, "10:30:00")
+                    if cheap_entry_price is None:
+                        cheap_entry_price = default_premium
+                    cheap_entry_price += PER_LEG_SLIPPAGE
+                    
+                    extra_roll_charges = lots * 150
+                    
+                    if es is not None:
+                        pnl_curr = ((entry_sell - (es + PER_LEG_SLIPPAGE)) * total_qty) + \
+                                   (((buy_exit_price_1030 - PER_LEG_SLIPPAGE) - entry_buy) * total_qty) + \
+                                   ((0.05 - cheap_entry_price) * total_qty) - charges - extra_roll_charges
+                                   
+                        if pnl_curr > 0:
+                            final_exit_sell = es
+                            buy_exit_price = buy_exit_price_1030
+                            exit_time = tm
+                            exit_status = 'Target Hit'
+                            break
             if exit_status: break
+            
+        # If morning target was not hit, resolve final close price for the OTM-3 leg
+        if buy_exit_price is None:
+            buy_exit_price = buy_exit_price_1030
             
         if not exit_status:
             exit_time = "15:15:00"
@@ -255,8 +298,24 @@ for otm_distance, default_premium in [(5, 0.40), (6, 0.25), (7, 0.15)]:
         if pnl_val > 0: wins += 1
         total_trades += 1
         
+        # Track yearly stats
+        trade_year = sell_date.split('-')[0]
+        if trade_year not in yearly_stats:
+            yearly_stats[trade_year] = {'pnl': 0.0, 'wins': 0, 'total': 0}
+        yearly_stats[trade_year]['pnl'] += pnl_val
+        yearly_stats[trade_year]['total'] += 1
+        if pnl_val > 0:
+            yearly_stats[trade_year]['wins'] += 1
+        
     net_pnl = sum(trades_pnl)
     win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0
     print(f"  Total Trades: {total_trades}")
     print(f"  Win Rate    : {win_rate:.2f}% ({wins} wins)")
     print(f"  Net PnL     : Rs {net_pnl:,.2f}")
+    print("  Yearly Performance Breakdown:")
+    for yr in sorted(yearly_stats.keys()):
+        yr_pnl = yearly_stats[yr]['pnl']
+        yr_wins = yearly_stats[yr]['wins']
+        yr_tot = yearly_stats[yr]['total']
+        yr_wr = (yr_wins / yr_tot) * 100 if yr_tot > 0 else 0
+        print(f"    - {yr}: Net PnL = Rs {yr_pnl:,.2f} | Win Rate = {yr_wr:.2f}% ({yr_wins}/{yr_tot} trades)")
