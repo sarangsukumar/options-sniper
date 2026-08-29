@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apple-to-Apple PnL Comparison: Aarang vs. Amrit</title>
+    <style>
+        :root {
+            --primary: #0f172a;
+            --primary-accent: #2563eb;
+            --aarang-color: #059669;
+            --amrit-color: #d97706;
+            --success: #10b981;
+            --danger: #ef4444;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --text-dark: #0f172a;
+            --text-muted: #64748b;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            background-color: var(--bg);
+            color: var(--text-dark);
+            line-height: 1.6;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        .header {
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+            color: white;
+            padding: 35px 40px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            margin-bottom: 25px;
+        }
+        .header h1 {
+            font-size: 2.1rem;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+        .header p {
+            color: #94a3b8;
+            font-size: 1.05rem;
+        }
+        .filter-badge-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .filter-badge {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            color: #f8fafc;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            margin-bottom: 25px;
+        }
+        .stat-card-aarang {
+            background: #ecfdf5;
+            border: 2px solid #a7f3d0;
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .stat-card-amrit {
+            background: #fffbeb;
+            border: 2px solid #fde68a;
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .label {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .label-aarang { color: #047857; }
+        .label-amrit { color: #b45309; }
+        .value {
+            font-size: 2.3rem;
+            font-weight: 800;
+            margin: 8px 0;
+        }
+        .val-aarang { color: #065f46; }
+        .val-amrit { color: #92400e; }
+        .subtext {
+            font-size: 0.92rem;
+            color: var(--text-muted);
+        }
+        h2 {
+            font-size: 1.35rem;
+            color: var(--primary);
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 2px solid #f1f5f9;
+            padding-bottom: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 0.95rem;
+        }
+        th, td {
+            padding: 12px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background-color: #f8fafc;
+            font-weight: 700;
+            color: var(--text-dark);
+        }
+        tr:hover {
+            background-color: #f8fafc;
+        }
+        .highlight-row {
+            background-color: #eff6ff;
+            font-weight: 700;
+        }
+        .callout-success {
+            background-color: #ecfdf5;
+            border-left: 4px solid var(--success);
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            color: #065f46;
+            font-size: 0.95rem;
+        }
+        .footer {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-top: 35px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Header -->
+    <div class="header">
+        <h1>Apple-to-Apple PnL & Strategy Performance Audit</h1>
+        <p>Comprehensive Year-Over-Year Comparison: Aarang (R1/R3) vs. Amrit Algorithm</p>
+        <div class="filter-badge-bar">
+            <span class="filter-badge">⏱️ True Business DTE &gt; 4 Trading Days</span>
+            <span class="filter-badge">📊 Credit Spread Ratio &ge; 30%</span>
+            <span class="filter-badge">💵 ATM Option Premium &ge; ₹10.00</span>
+            <span class="filter-badge">💼 Capital: ₹4,00,000 / trade</span>
+        </div>
+    </div>
+
+    <!-- Top Comparative Cards -->
+    <div class="grid-2">
+        <div class="stat-card-aarang">
+            <div class="label label-aarang">Aarang Algorithm (Our Best R1/R3)</div>
+            <div class="value val-aarang">+₹52,14,760.50</div>
+            <div class="subtext"><strong>310 Trades</strong> • <strong>86.8% Win Rate</strong> (269 W / 41 L)<br>Avg Win: <strong>+₹29,557.45</strong> • Avg Loss: -₹66,736.40</div>
+        </div>
+
+        <div class="stat-card-amrit">
+            <div class="label label-amrit">Amrit Algorithm</div>
+            <div class="value val-amrit">+₹22,17,018.75</div>
+            <div class="subtext"><strong>445 Trades</strong> • <strong>86.5% Win Rate</strong> (385 W / 60 L)<br>Avg Win: <strong>+₹15,108.89</strong> • Avg Loss: -₹59,998.43</div>
+        </div>
+    </div>
+
+    <!-- Year-over-Year Detailed Table -->
+    <div class="card">
+        <h2>📅 Year-Over-Year Performance Matrix</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th rowspan="2" style="vertical-align: middle;">Year</th>
+                    <th colspan="3" style="text-align: center; background-color: #ecfdf5; color: #065f46; border-bottom: 2px solid #10b981;">Aarang (Our Model)</th>
+                    <th colspan="3" style="text-align: center; background-color: #fffbeb; color: #92400e; border-bottom: 2px solid #f59e0b;">Amrit Model</th>
+                    <th rowspan="2" style="vertical-align: middle; text-align: center;">Alpha Generated (Aarang Advantage)</th>
+                </tr>
+                <tr>
+                    <th style="background-color: #ecfdf5;">Trades (W/L)</th>
+                    <th style="background-color: #ecfdf5;">Win Rate</th>
+                    <th style="background-color: #ecfdf5;">Net PnL (₹)</th>
+                    <th style="background-color: #fffbeb;">Trades (W/L)</th>
+                    <th style="background-color: #fffbeb;">Win Rate</th>
+                    <th style="background-color: #fffbeb;">Net PnL (₹)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>2024</strong></td>
+                    <td>151 (131 W / 20 L)</td>
+                    <td><strong>86.8%</strong></td>
+                    <td style="color: #059669; font-weight: bold;">+₹31,40,190.00</td>
+                    <td>178 (157 W / 21 L)</td>
+                    <td>88.2%</td>
+                    <td style="color: #d97706; font-weight: bold;">+₹10,52,351.25</td>
+                    <td style="color: #059669; font-weight: bold; text-align: center;">+₹20,87,838.75 (+198%)</td>
+                </tr>
+                <tr>
+                    <td><strong>2025</strong></td>
+                    <td>106 (91 W / 15 L)</td>
+                    <td><strong>85.8%</strong></td>
+                    <td style="color: #059669; font-weight: bold;">+₹12,06,314.75</td>
+                    <td>170 (146 W / 24 L)</td>
+                    <td>85.9%</td>
+                    <td style="color: #d97706; font-weight: bold;">+₹3,07,928.75</td>
+                    <td style="color: #059669; font-weight: bold; text-align: center;">+₹8,98,386.00 (+292%)</td>
+                </tr>
+                <tr>
+                    <td><strong>2026</strong></td>
+                    <td>53 (47 W / 6 L)</td>
+                    <td><strong>88.7%</strong></td>
+                    <td style="color: #059669; font-weight: bold;">+₹8,68,255.75</td>
+                    <td>97 (82 W / 15 L)</td>
+                    <td>84.5%</td>
+                    <td style="color: #d97706; font-weight: bold;">+₹8,56,738.75</td>
+                    <td style="color: #059669; font-weight: bold; text-align: center;">+₹11,517.00 (+1.3%)</td>
+                </tr>
+                <tr class="highlight-row">
+                    <td><strong>TOTAL (3-Yr)</strong></td>
+                    <td><strong>310 (269 W / 41 L)</strong></td>
+                    <td><strong>86.8%</strong></td>
+                    <td style="color: #059669; font-size: 1.15rem;">+₹52,14,760.50</td>
+                    <td><strong>445 (385 W / 60 L)</strong></td>
+                    <td><strong>86.5%</strong></td>
+                    <td style="color: #d97706; font-size: 1.15rem;">+₹22,17,018.75</td>
+                    <td style="color: #059669; font-size: 1.15rem; text-align: center;">🚀 +₹29,97,741.75 (+135%)</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout-success">
+            <strong>Key Takeaway:</strong> While both algorithms achieve virtually identical win rates (<strong>86.8% vs. 86.5%</strong>), Aarang delivers <strong>2.35x higher net cumulative profit (+₹29.98 Lakhs alpha)</strong> because our momentum selection mechanism captures <strong>₹29,557 per win (1.96x higher)</strong> compared to ₹15,108 for Amrit.
+        </div>
+    </div>
+
+    <!-- Core Metrics Table -->
+    <div class="card">
+        <h2>📊 Side-by-Side Strategy Economics</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Performance Metric</th>
+                    <th>Aarang Algorithm (Our Best)</th>
+                    <th>Amrit Algorithm</th>
+                    <th>Economic Impact</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Average Win per Trade</strong></td>
+                    <td style="color: #059669; font-weight: bold;">+₹29,557.45</td>
+                    <td style="color: #d97706; font-weight: bold;">+₹15,108.89</td>
+                    <td><strong>+95.6% larger winning payoffs</strong></td>
+                </tr>
+                <tr>
+                    <td><strong>Average Loss per Trade</strong></td>
+                    <td>-₹66,736.40</td>
+                    <td>-₹59,998.43</td>
+                    <td>Comparable loss containment</td>
+                </tr>
+                <tr>
+                    <td><strong>Profit Factor (Total Win / Loss)</strong></td>
+                    <td style="color: #059669; font-weight: bold;">2.91</td>
+                    <td>1.62</td>
+                    <td><strong>Aarang generates 80% higher profit per unit of risk</strong></td>
+                </tr>
+                <tr>
+                    <td><strong>Expected Value (EV) per Trade</strong></td>
+                    <td style="color: #059669; font-weight: bold;">+₹16,821.81</td>
+                    <td>+₹4,982.06</td>
+                    <td><strong>3.38x higher profit expectancy per execution</strong></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="footer">
+        <p>Quantitative Analytics Engine • Antigravity 2.0 • Generated on August 29, 2026</p>
+    </div>
+</div>
+
+</body>
+</html>
