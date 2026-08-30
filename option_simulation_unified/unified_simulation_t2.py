@@ -278,7 +278,7 @@ class UnifiedT2SimulationEngine:
             exit_info = None
             
             # -------------------------------------------------------------
-            # STEP A: Scan Day T+1 for positive profit (09:16:00 to 15:00:00)
+            # STEP A: Scan Day T+1 for net positive profit (09:16:00 to 15:00:00)
             # -------------------------------------------------------------
             atm_t1 = c['atm_t1_ticks']
             otm3_t1 = c['otm3_t1_ticks']
@@ -289,7 +289,12 @@ class UnifiedT2SimulationEngine:
                 atm_exit = atm_t1[m]['close']
                 otm3_exit = otm3_t1[m]['close']
                 gross_pt = (raw_atm_open - atm_exit) + (otm3_exit - raw_otm3_open)
-                if gross_pt > 0:
+                gross_pnl = gross_pt * total_qty
+                slip = total_qty * self.roundtrip_slippage_per_share
+                chg = lots * self.taxes_and_charges_per_lot
+                net = gross_pnl - slip - chg
+                
+                if net > 0:
                     exited = True
                     exit_info = {
                         'Exit_Date': c['T1_Date'],
@@ -315,7 +320,12 @@ class UnifiedT2SimulationEngine:
                     atm_exit = atm_t2[m]['close']
                     otm3_exit = otm3_t2[m]['close']
                     gross_pt = (raw_atm_open - atm_exit) + (otm3_exit - raw_otm3_open)
-                    if gross_pt > 0:
+                    gross_pnl = gross_pt * total_qty
+                    slip = total_qty * self.roundtrip_slippage_per_share
+                    chg = lots * self.taxes_and_charges_per_lot
+                    net = gross_pnl - slip - chg
+                    
+                    if net > 0:
                         exited = True
                         exit_info = {
                             'Exit_Date': c['T2_Date'],
