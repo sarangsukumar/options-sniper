@@ -146,6 +146,7 @@ class UnifiedT2SimulationEngine:
         return 500
 
     def fetch_day_data(self, cursor, stk, icici, date_str, strike):
+        """Fetch all 1-minute OHLCV ticks for a given stock/strike/date."""
         strike_f = float(strike)
         cursor.execute("""
             SELECT datetime, open, high, low, close, volume 
@@ -159,11 +160,18 @@ class UnifiedT2SimulationEngine:
         if not rows:
             return None, None, {}
         
-        ticks = {r[0].strftime('%H:%M:00'): {'open': float(r[1]) if r[1] is not None else float(r[4]),
-                                             'high': float(r[2]) if r[2] is not None else float(r[4]),
-                                             'low': float(r[3]) if r[3] is not None else float(r[4]),
-                                             'close': float(r[4])} for r in rows}
+        # Build tick dict keyed by HH:MM:00
+        ticks = {}
+        for r in rows:
+            close_p = float(r[4]) if r[4] is not None else 0.0
+            ticks[r[0].strftime('%H:%M:00')] = {
+                'open':  float(r[1]) if r[1] is not None else close_p,
+                'high':  float(r[2]) if r[2] is not None else close_p,
+                'low':   float(r[3]) if r[3] is not None else close_p,
+                'close': close_p
+            }
         
+        # Entry price: first tick in 15:20–15:30 window (use OPEN price = sell at market open of that candle)
         entry_price = None
         entry_time = None
         for t_str in sorted(ticks.keys()):
@@ -172,10 +180,16 @@ class UnifiedT2SimulationEngine:
                 entry_time = f"{date_str} {t_str}"
                 break
         
+        # Fallback: use close of last available tick before 15:30 (data gap on entry day)
         if entry_price is None and ticks:
-            last_t = sorted(ticks.keys())[-1]
-            entry_price = ticks[last_t]['close']
-            entry_time = f"{date_str} {last_t}"
+            all_keys = sorted(ticks.keys())
+            # Only use fallback if this is clearly an entry-day context (last tick near 15:xx)
+            last_t = all_keys[-1]
+            if last_t >= '15:00:00':
+                entry_price = ticks[last_t]['close']
+                entry_time = f"{date_str} {last_t}"
+            # If last tick is well before 15:00, no valid entry — return None to skip the trade
+            # (ticks dict is still returned for exit-day scanning use)
             
         return entry_price, entry_time, ticks
 
@@ -511,10 +525,17 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run Unified T+2 Holding Option Simulation")
     parser.add_argument('--capital', type=float, default=400000.0, help="Daily portfolio capital limit")
     parser.add_argument('--max-lots', type=int, default=20, help="Max lots cap per trade")
+    parser.add_argument('--credit-ratio', type=float, default=0.30, help="Min net credit / spread width ratio (0.0 = no filter)")
+    parser.add_argument('--atm-threshold', type=float, default=5.0, help="Min ATM put premium to enter (default 5.0)")
     parser.add_argument('--output-csv', type=str, default='/home/ubuntu/sarang_bestmodel_t2_simulation_pnl.csv', help="Output CSV path")
     args = parser.parse_args()
 
-    engine = UnifiedT2SimulationEngine(capital_per_day=args.capital, max_lots=args.max_lots)
+    engine = UnifiedT2SimulationEngine(
+        capital_per_day=args.capital,
+        max_lots=args.max_lots,
+        credit_ratio_thresh=args.credit_ratio,
+        atm_threshold=args.atm_threshold
+    )
     df_res = engine.run_simulation()
     engine.print_performance_summary(df_res)
     df_res.to_csv(args.output_csv, index=False)
