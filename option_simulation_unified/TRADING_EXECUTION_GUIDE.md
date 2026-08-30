@@ -76,10 +76,13 @@ Before executing the trade, verify all 3 mandatory pre-entry conditions:
 ---
 
 ### Step 4: Position Sizing & Margin Allocation
-For a fixed margin allocation of **₹4,00,000 per trade**:
+For a margin allocation of **₹4,00,000 per trade** with a strict **Max 20 Lots Cap**:
 $$\text{Max Risk per Lot} = \text{Spread Width} \times \text{Lot Size}$$
-$$\text{Number of Lots} = \max\left(1, \text{round}\left(\frac{₹4,00,000}{\text{Spread Width} \times \text{Lot Size}}\right)\right)$$
-$$\text{Total Quantity} = \text{Lots} \times \text{Lot Size}$$
+$$\text{Calculated Lots} = \max\left(1, \text{round}\left(\frac{₹4,00,000}{\text{Spread Width} \times \text{Lot Size}}\right)\right)$$
+$$\text{Executed Lots} = \min(\text{Calculated Lots}, 20)$$
+$$\text{Total Quantity} = \text{Executed Lots} \times \text{Lot Size}$$
+
+- *Rationale for 20 Lots Cap*: Complies with broker order freeze limits, prevents excessive position sizes on narrow step-size contracts, and maintains balanced capital utilization across all trades.
 
 ---
 

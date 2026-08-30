@@ -48,12 +48,13 @@ ICICI_SCRIP_MAP = {
 
 class UnifiedSimulationEngine:
     def __init__(self, data_dir=None, atm_threshold=5.0, credit_ratio=0.30, dte_min=5, capital_per_trade=400000.0,
-                 db_host='localhost', db_user='root', db_password='root', db_name='markets'):
+                 max_lots=20, db_host='localhost', db_user='root', db_password='root', db_name='markets'):
         self.data_dir = data_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
         self.atm_threshold = float(atm_threshold)
         self.credit_ratio_thresh = float(credit_ratio)
         self.dte_min = int(dte_min)
         self.capital_per_trade = float(capital_per_trade)
+        self.max_lots = int(max_lots) if max_lots is not None else None
         
         self.db_host = db_host
         self.db_user = db_user
@@ -176,6 +177,7 @@ class UnifiedSimulationEngine:
         print(f"   Net Credit Ratio: >= {self.credit_ratio_thresh*100:.0f}%")
         print(f"   Min DTE: >= {self.dte_min} business days")
         print(f"   Allocated Capital: Rs. {self.capital_per_trade:,.2f} per trade")
+        print(f"   Max Lots Cap: {self.max_lots if self.max_lots is not None else 'No Limit'} lots")
         print("="*80 + "\n")
 
         db = mysql.connector.connect(host=self.db_host, user=self.db_user, password=self.db_password, database=self.db_name)
@@ -232,9 +234,10 @@ class UnifiedSimulationEngine:
                 filtered_credit += 1
                 continue
                 
-            # Position Sizing
+            # Position Sizing (with Max Lots Cap)
             lot_size = self.get_lot_size(stk, b_date)
-            lots = max(1, round(self.capital_per_trade / (spread_width * lot_size)))
+            calculated_lots = max(1, round(self.capital_per_trade / (spread_width * lot_size)))
+            lots = min(calculated_lots, self.max_lots) if self.max_lots is not None else calculated_lots
             total_qty = lots * lot_size
             
             # Entry Pricing with ₹0.10 Slippage per Leg
@@ -387,6 +390,7 @@ if __name__ == '__main__':
     parser.add_argument('--credit-ratio', type=float, default=0.30, help='Minimum Net Credit Ratio (default: 0.30)')
     parser.add_argument('--dte-min', type=int, default=5, help='Minimum business days to expiry (default: 5)')
     parser.add_argument('--capital', type=float, default=400000.0, help='Capital allocated per trade (default: 400000.0)')
+    parser.add_argument('--max-lots', type=int, default=20, help='Maximum lot limit per trade (default: 20)')
     parser.add_argument('--output-csv', type=str, default='unified_trades.csv', help='Output CSV trade log path')
     parser.add_argument('--data-dir', type=str, default=None, help='Path to reference data directory')
     args = parser.parse_args()
@@ -396,6 +400,7 @@ if __name__ == '__main__':
         atm_threshold=args.atm_threshold,
         credit_ratio=args.credit_ratio,
         dte_min=args.dte_min,
-        capital_per_trade=args.capital
+        capital_per_trade=args.capital,
+        max_lots=args.max_lots
     )
     engine.run(output_csv=args.output_csv)
