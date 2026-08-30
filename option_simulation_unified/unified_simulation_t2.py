@@ -23,7 +23,7 @@ import mysql.connector
 
 class UnifiedT2SimulationEngine:
     def __init__(self, data_dir=None, db_config=None, capital_per_day=400000.0,
-                 max_lots=20, atm_threshold=5.0, dte_min=5, credit_ratio_thresh=0.0):
+                 max_lots=20, atm_threshold=5.0, dte_min=5, credit_ratio_thresh=0.30):
         self.data_dir = data_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
         self.db_config = db_config or {
             'host': 'localhost',
