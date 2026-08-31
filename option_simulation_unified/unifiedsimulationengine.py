@@ -133,6 +133,8 @@ class UnifiedSimulationEngine:
         return 500
 
     def fetch_day_data(self, cursor, stk, icici, date_str, strike):
+        """Fetch OHLCV ticks. Entry price only valid if a 15:20–15:30 tick exists,
+        or at minimum a tick at/after 15:00 (never use stale morning prices for entry)."""
         strike_f = float(strike)
         cursor.execute("""
             SELECT datetime, open, high, low, close, volume 
@@ -146,25 +148,41 @@ class UnifiedSimulationEngine:
         if not rows:
             return None, None, {}
         
-        ticks = {r[0].strftime('%H:%M:00'): {'open': float(r[1]) if r[1] is not None else float(r[4]),
-                                             'high': float(r[2]) if r[2] is not None else float(r[4]),
-                                             'low': float(r[3]) if r[3] is not None else float(r[4]),
-                                             'close': float(r[4]),
-                                             'volume': r[5]} for r in rows if r[4] is not None}
+        # Build tick dict — safe handling of None OHLC values
+        ticks = {}
+        for r in rows:
+            if r[4] is None:
+                continue
+            close_p = float(r[4])
+            ticks[r[0].strftime('%H:%M:00')] = {
+                'open':   float(r[1]) if r[1] is not None else close_p,
+                'high':   float(r[2]) if r[2] is not None else close_p,
+                'low':    float(r[3]) if r[3] is not None else close_p,
+                'close':  close_p,
+                'volume': r[5]
+            }
         
+        # Entry price: first tick in 15:20–15:30 window (preferred order: 15:25 → 15:20 → 15:30)
         raw_entry = None
         entry_time = None
-        for t_str in ['15:25:00', '15:24:00', '15:26:00', '15:23:00', '15:27:00', '15:22:00', '15:28:00', '15:21:00', '15:29:00', '15:20:00', '15:30:00']:
+        for t_str in ['15:25:00', '15:24:00', '15:26:00', '15:23:00', '15:27:00',
+                      '15:22:00', '15:28:00', '15:21:00', '15:29:00', '15:20:00', '15:30:00']:
             if t_str in ticks:
-                raw_entry = float(ticks[t_str]['open'])
+                raw_entry = ticks[t_str]['open']
                 entry_time = t_str
                 break
-                
+        
+        # Fallback: ONLY use last tick if it is at/after 15:00 (never use morning stale prices)
         if raw_entry is None:
-            raw_entry = float(rows[-1][1]) if rows[-1][1] is not None else float(rows[-1][4])
-            entry_time = rows[-1][0].strftime('%H:%M:00')
+            all_keys = sorted(ticks.keys())
+            if all_keys:
+                last_t = all_keys[-1]
+                if last_t >= '15:00:00':   # ← KEY FIX: skip trade if data ends before 15:00
+                    raw_entry = ticks[last_t]['close']
+                    entry_time = last_t
+                # If last tick < 15:00 → raw_entry stays None → trade will be skipped by caller
             
-        return float(raw_entry), entry_time, ticks
+        return (float(raw_entry) if raw_entry is not None else None), entry_time, ticks
 
     def run(self, output_csv='sarang_bestmodel_detailed_pnl_sheet.csv'):
         t0 = time.time()
