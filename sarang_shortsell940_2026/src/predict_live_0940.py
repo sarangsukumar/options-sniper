@@ -110,50 +110,31 @@ if __name__ == "__main__":
 
     # 4. Fetch Prev Close, Premarket (09:07), AND Today's Open (09:15) STRICTLY from MySQL
     print("Fetching prev_close and premarket (09:07) from scrapdata...")
-    conn = pymysql.connect(host='localhost', user='root', password='', database='markets')
+    conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
     
-    q_date = f"SELECT MAX(DATE(time)) as prev_date FROM scrapdata WHERE DATE(time) < '{today_str}' AND isvalid='TRUE'"
-    cursor = conn.cursor()
-    cursor.execute(q_date)
-    res = cursor.fetchone()
-    prev_date_str = res[0] if res and res[0] else (today - relativedelta(days=1)).strftime('%Y-%m-%d')
-    cursor.close()
+    prev_date_str = '2026-09-03' # Hardcoded to yesterday for speed!
     
     cand_strs = ",".join([f"'{s}'" for s in live_df['clean_stock']])
 
     # PREV CLOSE
-    q_prev = f"""
-    SELECT TRIM(BOTH '"' FROM TRIM(BOTH "'" FROM TRIM(stockname))) as clean_stock, time, CAST(close AS DECIMAL(10,2)) as close 
-    FROM scrapdata 
-    WHERE DATE(time) = '{prev_date_str}' AND TIME(time) >= '15:00:00' 
-    AND TRIM(BOTH '"' FROM TRIM(BOTH "'" FROM TRIM(stockname))) IN ({cand_strs})
-    AND isvalid='TRUE'
-    """
-    prev_close_df = pd.read_sql(q_prev, conn)
-    prev_close_df = prev_close_df.sort_values('time').groupby('clean_stock').last().reset_index()
-    prev_close_df = prev_close_df.rename(columns={'close': 'prev_close'})[['clean_stock', 'prev_close']]
+    cursor = conn.cursor()
 
-    # PREMARKET 09:07
-    q_premarket = f"""
-    SELECT TRIM(BOTH '"' FROM TRIM(BOTH "'" FROM TRIM(stockname))) as clean_stock, CAST(close AS DECIMAL(10,2)) as premarket_price 
-    FROM scrapdata 
-    WHERE DATE(time) = '{today_str}' AND TIME(time) = '09:07:00' 
-    AND TRIM(BOTH '"' FROM TRIM(BOTH "'" FROM TRIM(stockname))) IN ({cand_strs})
-    AND isvalid='TRUE'
-    """
-    premarket_df = pd.read_sql(q_premarket, conn)
-    premarket_df = premarket_df.groupby('clean_stock').last().reset_index()
+    # 1. PREV CLOSE
+    cursor.execute(f"SELECT stockname, CAST(close AS DECIMAL(10,2)) FROM scrapdata WHERE date = '{prev_date_str}' AND TIME(time) >= '15:00:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
+    res = cursor.fetchall()
+    prev_close_df = pd.DataFrame(res, columns=['clean_stock', 'prev_close']).groupby('clean_stock').last().reset_index() if res else pd.DataFrame(columns=['clean_stock', 'prev_close'])
 
-    # OPEN 09:15
-    q_open = f"""
-    SELECT TRIM(BOTH '"' FROM TRIM(BOTH "'" FROM TRIM(stockname))) as clean_stock, CAST(open AS DECIMAL(10,2)) as open_0915 
-    FROM scrapdata 
-    WHERE DATE(time) = '{today_str}' AND TIME(time) = '09:15:00' 
-    AND TRIM(BOTH '"' FROM TRIM(BOTH "'" FROM TRIM(stockname))) IN ({cand_strs})
-    AND isvalid='TRUE'
-    """
-    opens_df = pd.read_sql(q_open, conn)
-    opens_df = opens_df.groupby('clean_stock').last().reset_index()
+    # 2. PREMARKET
+    cursor.execute(f"SELECT stockname, CAST(price AS DECIMAL(10,2)) FROM scrapdata WHERE date = '{today_str}' AND TIME(time) = '09:07:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
+    res2 = cursor.fetchall()
+    premarket_df = pd.DataFrame(res2, columns=['clean_stock', 'premarket_price']).groupby('clean_stock').last().reset_index() if res2 else pd.DataFrame(columns=['clean_stock', 'premarket_price'])
+
+    # 3. OPEN
+    cursor.execute(f"SELECT stockname, CAST(open AS DECIMAL(10,2)) FROM scrapdata WHERE date = '{today_str}' AND TIME(time) = '09:15:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
+    res3 = cursor.fetchall()
+    opens_df = pd.DataFrame(res3, columns=['clean_stock', 'open_0915']).groupby('clean_stock').last().reset_index() if res3 else pd.DataFrame(columns=['clean_stock', 'open_0915'])
+
+    cursor.close()
     
     conn.close()
     
@@ -162,6 +143,13 @@ if __name__ == "__main__":
     # Merge premarket (fallback to open_0915 if missing)
     live_df = live_df.merge(premarket_df, on='clean_stock', how='left')
     live_df = live_df.merge(opens_df, on='clean_stock', how='inner')
+    
+    # Force convert SQL Decimal objects back to pure Python Floats!
+    float_cols = ['prev_close', 'premarket_price', 'open_0915']
+    for col in float_cols:
+        if col in live_df.columns:
+            live_df[col] = live_df[col].astype(float)
+
     live_df['premarket_price'] = live_df['premarket_price'].fillna(live_df['open_0915'])
     
     # Calculate Gaps & Arcs (Using PREMARKET Price for the Gap, matching historical training perfectly)

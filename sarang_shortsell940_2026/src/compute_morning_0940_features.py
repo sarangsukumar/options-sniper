@@ -8,7 +8,7 @@ import os
 warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
 
 # DB config 
-DB_CONFIG = {'host': 'localhost', 'user': 'root', 'password': '', 'database': 'markets'}
+DB_CONFIG = {'host': 'localhost', 'user': 'root', 'password': 'root', 'database': 'markets'}
 TABLE_NAME = 'scrapdata'
 CUTOFF_TIME = time(9, 40)
 
@@ -142,9 +142,9 @@ def run():
             CAST(low AS DECIMAL(10,2)) as low,
             CAST(close AS DECIMAL(10,2)) as close
         FROM {TABLE_NAME}
-        WHERE DATE(time) = %s
+        WHERE date = %s
         AND TIME(time) BETWEEN '09:15:00' AND %s
-        AND TRIM(BOTH '"' FROM TRIM(BOTH "'" FROM TRIM(stockname))) IN ({cand_strs})
+        AND stockname IN ({cand_strs})
         AND isvalid='TRUE'
         """
         data_df = pd.read_sql(data_query, conn, params=[today_str, CUTOFF_TIME.strftime('%H:%M:%S')])

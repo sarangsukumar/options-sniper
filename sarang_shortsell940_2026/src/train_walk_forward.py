@@ -53,6 +53,7 @@ def build_features(df_path, premarket_path, banlist_path):
     df['positive_half_circle_prev_close'] = df['spike_from_prev_close_pct'] * df['fade_from_high_pct']
     df['gap_fade_completion'] = (df['open_0915'] - df['price_0940']) / (df['open_0915'] - df['prev_close'] + 1e-9)
 
+    # ✅ Reverted: raw prices perform better on 2026 market regime
     print("Building R1/R3 Historical Features...")
     df['expiry_date'] = df['short_sell_date'].apply(get_expiry_date)
     df['days_to_expiry'] = (df['expiry_date'] - df['short_sell_date']).dt.days
@@ -109,6 +110,7 @@ if __name__ == "__main__":
 
     df_no_mon['Year'] = df_no_mon['short_sell_date'].dt.year
     all_selected = []
+    r1_trades = []
     
     print("Running LightGBM Walk-Forward Evaluation...")
     for test_year in range(2018, 2027):
@@ -122,10 +124,14 @@ if __name__ == "__main__":
         
         sel = test_df[test_df['ml_prob'] >= 0.53].copy()
         sel['daily_rank'] = sel.groupby('date_str')['ml_prob'].rank(method='first', ascending=False)
+        sel['price_0940'] = sel['prev_close'] * (1 + sel['Gap_Pct'] / 100) * (1 + sel['morning_return'] / 100)
         
         sel_1_4 = sel[sel['daily_rank'].isin([1, 4])]
         for _, row in sel_1_4.iterrows():
-            all_selected.append({'Year': test_year, 'PnL': row['short_pnl_net']})
+            all_selected.append({'Year': test_year, 'PnL': row['short_pnl_net'], 'date_str': row['date_str'], 'clean_stock': row['clean_stock'], 'ml_prob': row['ml_prob'], 'daily_rank': row['daily_rank'], 'short_pnl_net': row['short_pnl_net'], 'price_0940': row.get('price_0940', 0)})
+        
+        r1_sel = sel[sel['daily_rank'] == 1.0].copy()
+        r1_trades.append(r1_sel)
 
     res_df = pd.DataFrame(all_selected)
     print("\n🏆 RANK 1 + RANK 4 COMBO (LGBM + ARC + R1/R3)")
@@ -133,3 +139,41 @@ if __name__ == "__main__":
         y_df = res_df[res_df['Year'] == year]
         print(f" {year} | Trades: {len(y_df):<4} | Win: {(y_df['PnL']>0).mean()*100:>5.1f}% | Avg PnL: ₹{y_df['PnL'].mean():,.2f}")
     print(f"OVERALL | Trades: {len(res_df)} | Win: {(res_df['PnL'] > 0).mean()*100:.1f}% | Avg: ₹{res_df['PnL'].mean():,.2f} | Total: ₹{res_df['PnL'].sum():,.2f}")
+
+
+    # Generate exact R1 list from r1_trades collected inside the loop
+    import subprocess, os
+    r1 = pd.concat(r1_trades).copy() if r1_trades else pd.DataFrame()
+
+    if r1.empty:
+        print("No R1 trades collected!")
+    else:
+        # Merge Lotsize from ICICI master
+        try:
+            os.makedirs('/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell940_2026/output', exist_ok=True)
+            lots = pd.read_csv('/home/ubuntu/KotakCodes1/ICICImaster_options.csv')
+            lots = lots[lots['series'] == 'FUTSTK'][['stockcodes', 'lotsize']].copy()
+            lots['clean_stock'] = lots['stockcodes'].str.strip()
+            lots = lots.rename(columns={'lotsize': 'LotSize'})
+            lots = lots.drop_duplicates('clean_stock')
+            r1 = r1.merge(lots[['clean_stock', 'LotSize']], on='clean_stock', how='left')
+        except Exception as e:
+            print("Could not merge lotsize:", e)
+            r1['LotSize'] = 0
+
+        out_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell940_2026/output/historical_Rank1_trades_detailed.csv'
+        out_cols = ['date_str', 'clean_stock', 'price_0940', 'LotSize', 'ml_prob', 'short_pnl_net']
+        out_cols = [c for c in out_cols if c in r1.columns]
+        r1_sorted = r1.sort_values('date_str')
+        r1_sorted[out_cols].to_csv(out_path, index=False)
+        print(f"\n✅ Exported {len(r1_sorted)} R1 trades to {out_path}")
+
+        # Send CSV file directly via Telegram
+        recent = r1_sorted[r1_sorted['date_str'] >= '2024-01-01'].copy()
+        recent_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell940_2026/output/Rank1_trades_2024_onwards.csv'
+        recent[out_cols].to_csv(recent_path, index=False)
+        print(f"✅ 2024+ file saved: {recent_path}")
+
+        bot_path = "/home/ubuntu/telegram_bot/New_OrderInfoBot.js"
+        subprocess.run(["node", bot_path, recent_path])
+        print("✅ CSV file sent via Telegram!")
