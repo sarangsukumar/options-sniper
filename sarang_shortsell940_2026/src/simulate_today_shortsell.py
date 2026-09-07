@@ -59,7 +59,6 @@ def run_afternoon_simulation():
         send_telegram(msg)
         return
 
-    # Check date of targets
     file_date = str(targets_df['Date_x'].iloc[0]) if 'Date_x' in targets_df.columns else today_str
     if file_date != today_str:
         print(f"[Notice] Target file date is {file_date}, current date is {today_str}. Simulating for {file_date}...")
@@ -71,12 +70,12 @@ def run_afternoon_simulation():
     lotsize_df = pd.read_csv(LOTSIZE_CSV, low_memory=False)
     lotsize_df['stock_clean'] = lotsize_df['stockname'].str.strip().str.upper()
 
-    # Filter for Top 4 Fortress (Ranks 2, 3, 4, 5)
-    fortress_ranks = [2, 3, 4, 5]
-    trades_df = targets_df[targets_df['daily_rank'].isin(fortress_ranks)].sort_values('daily_rank').copy()
+    # Track ALL Top 5 Candidates (Ranks 1, 2, 3, 4, 5)
+    tracked_ranks = [1, 2, 3, 4, 5]
+    trades_df = targets_df[targets_df['daily_rank'].isin(tracked_ranks)].sort_values('daily_rank').copy()
 
     if trades_df.empty:
-        msg = f"📉 <b>09:41 SHORT SELL DAILY PNL REPORT</b>\n📅 Date: {sim_date}\n\n⚠️ No candidates qualified for Top 4 Fortress (Ranks 2, 3, 4, 5) today."
+        msg = f"📉 <b>09:41 SHORT SELL DAILY PNL REPORT</b>\n📅 Date: {sim_date}\n\n⚠️ No candidates qualified today."
         print(msg)
         send_telegram(msg)
         return
@@ -127,7 +126,7 @@ def run_afternoon_simulation():
             h = float(t['high'])
             l = float(t['low'])
 
-            # Stop Loss & Take Profit in same candle -> Worst-case assumption: SL hit first
+            # Worst-case tie-breaker: SL hit first
             if h >= sl_price and l <= tp_price:
                 exit_price = sl_price
                 exit_time_str = t_str
@@ -186,7 +185,6 @@ def run_afternoon_simulation():
     # Save to Master Live Tracking CSV
     if os.path.exists(TRACKING_CSV):
         master_df = pd.read_csv(TRACKING_CSV)
-        # Avoid duplicate date + stock entries
         master_df = master_df[~((master_df['date'] == sim_date) & (master_df['stock'].isin(res_df['stock'])))]
         master_df = pd.concat([master_df, res_df], ignore_index=True)
     else:
@@ -202,6 +200,17 @@ def run_afternoon_simulation():
     total_net_pnl = res_df['net_pnl'].sum()
     total_gross_pnl = res_df['gross_pnl'].sum()
 
+    # Sub-strategy summaries
+    r2_r5 = res_df[res_df['rank'].isin([2, 3, 4, 5])]
+    r2_r5_net = r2_r5['net_pnl'].sum() if not r2_r5.empty else 0
+    r2_r5_wins = int(r2_r5['is_win'].sum()) if not r2_r5.empty else 0
+    r2_r5_total = len(r2_r5)
+
+    r1_r4 = res_df[res_df['rank'].isin([1, 4])]
+    r1_r4_net = r1_r4['net_pnl'].sum() if not r1_r4.empty else 0
+    r1_r4_wins = int(r1_r4['is_win'].sum()) if not r1_r4.empty else 0
+    r1_r4_total = len(r1_r4)
+
     pnl_sign = "🟢" if total_net_pnl >= 0 else "🔴"
     pnl_formatted = f"+₹{total_net_pnl:,.0f}" if total_net_pnl >= 0 else f"-₹{abs(total_net_pnl):,.0f}"
 
@@ -209,7 +218,7 @@ def run_afternoon_simulation():
     tg_lines.append(f"📉 <b>09:41 SHORT SELL DAILY PNL REPORT</b>")
     tg_lines.append(f"📅 <b>Date:</b> {sim_date} | <b>Time:</b> {now_time_str} IST")
     tg_lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    tg_lines.append(f"🏆 <b>STRATEGY: TOP 4 FORTRESS (R2, R3, R4, R5)</b>")
+    tg_lines.append(f"📋 <b>ALL TOP CANDIDATES PERFORMANCE (R1 - R5)</b>")
     tg_lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     for _, r in res_df.iterrows():
@@ -225,11 +234,10 @@ def run_afternoon_simulation():
         tg_lines.append("")
 
     tg_lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    tg_lines.append(f"📊 <b>DAY PERFORMANCE SUMMARY:</b>")
-    tg_lines.append(f"• Total Trades: <b>{total_trades}</b>")
-    tg_lines.append(f"• Win Rate: <b>{win_rate:.1f}%</b> ({wins}W / {losses}L)")
-    tg_lines.append(f"• Total Gross PnL: ₹{total_gross_pnl:,.0f}")
-    tg_lines.append(f"• <b>TOTAL DAY NET PnL: {pnl_sign} {pnl_formatted}</b>")
+    tg_lines.append(f"📊 <b>STRATEGY BREAKDOWNS:</b>")
+    tg_lines.append(f"• <b>Top 4 Fortress (R2-R5):</b> {'🟢' if r2_r5_net >= 0 else '🔴'} <b>₹{r2_r5_net:+,.0f}</b> ({r2_r5_wins}/{r2_r5_total} Wins)")
+    tg_lines.append(f"• <b>Primary Combo (R1 & R4):</b> {'🟢' if r1_r4_net >= 0 else '🔴'} <b>₹{r1_r4_net:+,.0f}</b> ({r1_r4_wins}/{r1_r4_total} Wins)")
+    tg_lines.append(f"• <b>All Top 5 Combined:</b> {pnl_sign} <b>{pnl_formatted}</b> ({wins}/{total_trades} Wins, {win_rate:.0f}%)")
     tg_lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     tg_msg = "\n".join(tg_lines)
