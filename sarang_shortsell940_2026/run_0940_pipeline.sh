@@ -7,8 +7,11 @@ echo "--------------------------------------------------------"
 echo "Starting 09:40 AM Short Sell Pipeline at $(date)"
 echo "--------------------------------------------------------"
 
-# 1. Download live F1 futures ticks using ICICI Breeze F1 Downloader
-echo "[1/3] Downloading live near-month F&O Futures ticks to scrapdata_F1..."
+# 1. Download live Equity Cash ticks and F1 Futures ticks
+echo "[1/3a] Downloading live Equity Cash ticks to scrapdata..."
+node /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/pipeline/6.icici_daily_intraday_and_gap.js
+
+echo "[1/3b] Downloading live near-month F&O Futures ticks to scrapdata_F1..."
 node /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/pipeline/8.icicidatawithsession_F1.js
 if [ $? -ne 0 ]; then
     echo "ERROR: ICICI F1 Futures Downloader failed!"
