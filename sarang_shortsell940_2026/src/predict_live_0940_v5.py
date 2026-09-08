@@ -60,13 +60,13 @@ def compute_prev_day_indicators(prev_df):
     """Computes prior day intraday indicators from 1-min tick bars."""
     res = {}
     for stock, g in prev_df.groupby('clean_stock'):
-        prices = g['price'].values
+        prices = g['price'].astype(float).values
         if len(prices) < 5:
             continue
-        open_p = prices[0]
-        close_p = prices[-1]
-        high_p = prices.max()
-        low_p = prices.min()
+        open_p = float(prices[0])
+        close_p = float(prices[-1])
+        high_p = float(prices.max())
+        low_p = float(prices.min())
         
         # 1. Return
         ret = (close_p - open_p) / open_p * 100.0 if open_p > 0 else 0.0
@@ -75,33 +75,33 @@ def compute_prev_day_indicators(prev_df):
         deltas = np.diff(prices)
         gains = np.where(deltas > 0, deltas, 0)
         losses = np.where(deltas < 0, -deltas, 0)
-        avg_g = np.mean(gains[-9:]) if len(gains) >= 9 else np.mean(gains) if len(gains) > 0 else 0
-        avg_l = np.mean(losses[-9:]) if len(losses) >= 9 else np.mean(losses) if len(losses) > 0 else 0
+        avg_g = float(np.mean(gains[-9:])) if len(gains) >= 9 else float(np.mean(gains)) if len(gains) > 0 else 0.0
+        avg_l = float(np.mean(losses[-9:])) if len(losses) >= 9 else float(np.mean(losses)) if len(losses) > 0 else 0.0
         rsi9 = 100.0 if avg_l == 0 else 100.0 - (100.0 / (1.0 + (avg_g / avg_l)))
         
         # 3. MACD
         s_close = pd.Series(prices)
-        ema12 = s_close.ewm(span=12, adjust=False).mean().iloc[-1]
-        ema26 = s_close.ewm(span=26, adjust=False).mean().iloc[-1]
+        ema12 = float(s_close.ewm(span=12, adjust=False).mean().iloc[-1])
+        ema26 = float(s_close.ewm(span=26, adjust=False).mean().iloc[-1])
         macd_val = ema12 - ema26
         
         # 4. EMA Cross
-        ema9 = s_close.ewm(span=9, adjust=False).mean().iloc[-1]
-        ema21 = s_close.ewm(span=21, adjust=False).mean().iloc[-1]
+        ema9 = float(s_close.ewm(span=9, adjust=False).mean().iloc[-1])
+        ema21 = float(s_close.ewm(span=21, adjust=False).mean().iloc[-1])
         ema_cross = (ema9 - ema21) / ema21 * 100.0 if ema21 > 0 else 0.0
         
         # 5. BB %B
-        s_std = s_close.rolling(20, min_periods=1).std().iloc[-1]
-        s_ma = s_close.rolling(20, min_periods=1).mean().iloc[-1]
+        s_std = float(s_close.rolling(20, min_periods=1).std().iloc[-1])
+        s_ma = float(s_close.rolling(20, min_periods=1).mean().iloc[-1])
         bb_pct_b = (close_p - (s_ma - 2*s_std)) / (4*s_std) if s_std > 0 else 0.5
         
         # 6. VWAP Gap
-        vwap = np.mean(prices)
+        vwap = float(np.mean(prices))
         vwap_gap = (close_p - vwap) / vwap * 100.0 if vwap > 0 else 0.0
         
         # 7. Stoch K
-        r_low = s_close.rolling(14, min_periods=1).min().iloc[-1]
-        r_high = s_close.rolling(14, min_periods=1).max().iloc[-1]
+        r_low = float(s_close.rolling(14, min_periods=1).min().iloc[-1])
+        r_high = float(s_close.rolling(14, min_periods=1).max().iloc[-1])
         stoch_k = (close_p - r_low) / (r_high - r_low) * 100.0 if r_high > r_low else 50.0
         
         # 8. Range Pos
@@ -187,13 +187,13 @@ def main():
     # 6. Compute Morning Indicators
     morn_list = []
     for stock, g in df_morn.groupby('clean_stock'):
-        prices = g['price'].values
+        prices = g['price'].astype(float).values
         if len(prices) < 3:
             continue
-        open_p = prices[0]
-        close_p = prices[-1]
-        high_p = prices.max()
-        low_p = prices.min()
+        open_p = float(prices[0])
+        close_p = float(prices[-1])
+        high_p = float(prices.max())
+        low_p = float(prices.min())
         
         ret_940 = (close_p - open_p) / open_p * 100.0 if open_p > 0 else 0.0
         morn_range = (high_p - low_p) / open_p * 100.0 if open_p > 0 else 0.0
@@ -215,6 +215,8 @@ def main():
     df_features = df_features.merge(df_0907_f1, on='clean_stock', how='left')
     
     # Engineer premarket unified price & features
+    df_features['price_0907_eq'] = pd.to_numeric(df_features['price_0907_eq'], errors='coerce')
+    df_features['price_0907_f1'] = pd.to_numeric(df_features['price_0907_f1'], errors='coerce')
     df_features['price_0907_unified'] = df_features['price_0907_f1'].fillna(df_features['price_0907_eq']).fillna(df_features['morning_open'])
     
     df_features['Gap_Pct'] = np.where(
