@@ -9,7 +9,7 @@ warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
 
 # DB config 
 DB_CONFIG = {'host': 'localhost', 'user': 'root', 'password': 'root', 'database': 'markets'}
-TABLE_NAME = 'scrapdata'
+TABLE_NAME = 'scrapdata_F1'
 CUTOFF_TIME = time(9, 40)
 
 OUTPUT_FILE = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell940_2026/data/live_morning_features.csv'
