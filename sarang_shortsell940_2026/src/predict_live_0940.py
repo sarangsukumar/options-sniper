@@ -115,7 +115,7 @@ if __name__ == "__main__":
     cursor = conn.cursor()
 
     # Dynamic lookup of previous trading date from scrapdata
-    cursor.execute(f"SELECT MAX(date) FROM scrapdata WHERE date < '{today_str}'")
+    cursor.execute(f"SELECT MAX(date) FROM scrapdata_F1 WHERE date < '{today_str}'")
     row = cursor.fetchone()
     prev_date_str = str(row[0]) if row and row[0] else '2026-09-03'
     print(f"Detected previous trading date in scrapdata: {prev_date_str}")
@@ -123,17 +123,17 @@ if __name__ == "__main__":
     cand_strs = ",".join([f"'{s}'" for s in live_df['clean_stock']])
 
     # 1. PREV CLOSE
-    cursor.execute(f"SELECT stockname, CAST(close AS DECIMAL(10,2)) FROM scrapdata WHERE date = '{prev_date_str}' AND TIME(time) >= '15:00:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
+    cursor.execute(f"SELECT stockname, CAST(close AS DECIMAL(10,2)) FROM scrapdata_F1 WHERE date = '{prev_date_str}' AND TIME(time) >= '15:00:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
     res = cursor.fetchall()
     prev_close_df = pd.DataFrame(res, columns=['clean_stock', 'prev_close']).groupby('clean_stock').last().reset_index() if res else pd.DataFrame(columns=['clean_stock', 'prev_close'])
 
     # 2. PREMARKET
-    cursor.execute(f"SELECT stockname, CAST(price AS DECIMAL(10,2)) FROM scrapdata WHERE date = '{today_str}' AND TIME(time) = '09:07:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
+    cursor.execute(f"SELECT stockname, CAST(price AS DECIMAL(10,2)) FROM scrapdata_F1 WHERE date = '{today_str}' AND TIME(time) = '09:07:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
     res2 = cursor.fetchall()
     premarket_df = pd.DataFrame(res2, columns=['clean_stock', 'premarket_price']).groupby('clean_stock').last().reset_index() if res2 else pd.DataFrame(columns=['clean_stock', 'premarket_price'])
 
     # 3. OPEN
-    cursor.execute(f"SELECT stockname, CAST(open AS DECIMAL(10,2)) FROM scrapdata WHERE date = '{today_str}' AND TIME(time) = '09:15:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
+    cursor.execute(f"SELECT stockname, CAST(open AS DECIMAL(10,2)) FROM scrapdata_F1 WHERE date = '{today_str}' AND TIME(time) = '09:15:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
     res3 = cursor.fetchall()
     opens_df = pd.DataFrame(res3, columns=['clean_stock', 'open_0915']).groupby('clean_stock').last().reset_index() if res3 else pd.DataFrame(columns=['clean_stock', 'open_0915'])
 
