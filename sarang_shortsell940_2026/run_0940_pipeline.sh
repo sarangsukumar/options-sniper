@@ -28,7 +28,7 @@ fi
 
 # 3. Predict R1 to R5 Targets and Send to Telegram
 echo "[3/3] Running ML Predictor & Sending Telegram Alerts..."
-python3 /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell940_2026/src/predict_live_0940.py
+python3 /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell940_2026/src/predict_live_0940_v5.py
 if [ $? -ne 0 ]; then
     echo "ERROR: ML Prediction failed!"
     exit 1
