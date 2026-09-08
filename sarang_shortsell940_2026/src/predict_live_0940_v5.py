@@ -5,7 +5,11 @@
 Production Daily Live Inference Runner (Model v5).
 Runs automatically via cron at 09:40:05 AM every trading day.
 
-Strictly aligned with historical training feature pipeline (15 features):
+CORE ALGORITHM RULE:
+  Only evaluates candidates that met 'Custom Limit Fill' in markets_pnl0325.csv
+  for the latest trading date.
+
+15 Strictly Leak-Free Features:
   1. Gap_Pct
   2. gap_0907_pct
   3. gap_fade_0907_to_940_pct
@@ -35,6 +39,7 @@ warnings.filterwarnings('ignore')
 
 BASE_DIR = '/home/ubuntu/shortsellmodel940v5'
 MODEL_PATH = os.path.join(BASE_DIR, 'models', 'model_v5_lgb.txt')
+PNL_PATH = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/data/markets_pnl0325.csv'
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', 'YOUR_CHAT_ID_HERE')
 
@@ -135,7 +140,26 @@ def main():
         
     booster = lgb.Booster(model_file=MODEL_PATH)
     
-    # 1. Connect to MySQL Database
+    # 1. Load Custom Limit Candidates from markets_pnl0325.csv
+    print(f"1. Reading Custom Limit Fills from: {PNL_PATH}")
+    valid_candidates = []
+    try:
+        pnl_df = pd.read_csv(PNL_PATH)
+        pnl_df['entry_date'] = pd.to_datetime(pnl_df['simulationdate'], format='mixed', dayfirst=True, errors='coerce')
+        last_trading_date = pnl_df['entry_date'].max()
+        
+        recent_fills = pnl_df[(pnl_df['entry_date'] == last_trading_date) & (pnl_df['sell_exec_type'].astype(str).str.contains('Custom Limit'))]
+        valid_candidates = recent_fills['stockname'].astype(str).str.strip().str.upper().tolist()
+        print(f" Found {len(valid_candidates)} Custom Limit candidate stocks for date {last_trading_date.strftime('%Y-%m-%d')}.")
+    except Exception as e:
+        print(f"⚠️ Error reading markets_pnl0325.csv: {e}")
+        
+    cand_sql_clause = ""
+    if valid_candidates:
+        cand_strs = ",".join([f"'{s}'" for s in valid_candidates])
+        cand_sql_clause = f" AND TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) IN ({cand_strs}) "
+    
+    # 2. Connect to MySQL Database
     conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
     cursor = conn.cursor()
     
@@ -145,32 +169,32 @@ def main():
     prev_date_str = str(prev_date_row[0]) if prev_date_row and prev_date_row[0] else None
     print(f" Identified previous trading date: {prev_date_str}")
     
-    # 2. Fetch previous day intraday ticks
+    # 3. Fetch previous day intraday ticks
     q_prev = f"""
     SELECT TRIM(BOTH '"' FROM TRIM(BOTH "'" FROM TRIM(stockname))) as clean_stock,
            time, CAST(price AS DECIMAL(10,2)) as price
     FROM scrapdata_F1
-    WHERE date = '{prev_date_str}' AND isvalid='TRUE'
+    WHERE date = '{prev_date_str}' AND isvalid='TRUE' {cand_sql_clause}
     ORDER BY time ASC
     """
     cursor.execute(q_prev)
     df_prev = pd.DataFrame(cursor.fetchall(), columns=['clean_stock', 'time', 'price'])
     
-    # 3. Fetch today's 09:07 AM pre-market ticks from BOTH scrapdata and scrapdata_F1
-    q_0907_eq = f"SELECT TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) as clean_stock, CAST(price AS DECIMAL(10,2)) as price_0907_eq FROM scrapdata WHERE date = '{today_str}' AND time = '{today_str} 09:07:00' AND isvalid='TRUE'"
+    # 4. Fetch today's 09:07 AM pre-market ticks from BOTH scrapdata and scrapdata_F1
+    q_0907_eq = f"SELECT TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) as clean_stock, CAST(price AS DECIMAL(10,2)) as price_0907_eq FROM scrapdata WHERE date = '{today_str}' AND time = '{today_str} 09:07:00' AND isvalid='TRUE' {cand_sql_clause}"
     cursor.execute(q_0907_eq)
     df_0907_eq = pd.DataFrame(cursor.fetchall(), columns=['clean_stock', 'price_0907_eq'])
     
-    q_0907_f1 = f"SELECT TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) as clean_stock, CAST(price AS DECIMAL(10,2)) as price_0907_f1 FROM scrapdata_F1 WHERE date = '{today_str}' AND time = '{today_str} 09:07:00' AND isvalid='TRUE'"
+    q_0907_f1 = f"SELECT TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) as clean_stock, CAST(price AS DECIMAL(10,2)) as price_0907_f1 FROM scrapdata_F1 WHERE date = '{today_str}' AND time = '{today_str} 09:07:00' AND isvalid='TRUE' {cand_sql_clause}"
     cursor.execute(q_0907_f1)
     df_0907_f1 = pd.DataFrame(cursor.fetchall(), columns=['clean_stock', 'price_0907_f1'])
     
-    # 4. Fetch today's morning 09:15-09:40 ticks
+    # 5. Fetch today's morning 09:15-09:40 ticks
     q_morn = f"""
     SELECT TRIM(BOTH '"' FROM TRIM(BOTH "'" FROM TRIM(stockname))) as clean_stock,
            time, CAST(price AS DECIMAL(10,2)) as price
     FROM scrapdata_F1
-    WHERE date = '{today_str}' AND time >= '{today_str} 09:15:00' AND time <= '{today_str} 09:40:00' AND isvalid='TRUE'
+    WHERE date = '{today_str}' AND time >= '{today_str} 09:15:00' AND time <= '{today_str} 09:40:00' AND isvalid='TRUE' {cand_sql_clause}
     ORDER BY time ASC
     """
     cursor.execute(q_morn)
@@ -178,13 +202,13 @@ def main():
     conn.close()
     
     if df_morn.empty:
-        print(f"⚠️ No morning ticks found in scrapdata_F1 for date {today_str}.")
+        print(f"⚠️ No morning ticks found in scrapdata_F1 for candidate stocks on date {today_str}.")
         return
         
-    # 5. Compute Previous Day Indicators
+    # 6. Compute Previous Day Indicators
     df_prev_features = compute_prev_day_indicators(df_prev)
     
-    # 6. Compute Morning Indicators
+    # 7. Compute Morning Indicators
     morn_list = []
     for stock, g in df_morn.groupby('clean_stock'):
         prices = g['price'].astype(float).values
@@ -249,7 +273,7 @@ def main():
     
     top3 = df_features.sort_values('prob_win', ascending=False).head(3).reset_index(drop=True)
     
-    # 7. Build Telegram Alert Message
+    # 8. Build Telegram Alert Message
     msg = f"🔥 *SHORT SELL MODEL v5 HIGH CONVICTION SIGNALS ({today_str})*\n"
     msg += f"⏰ *Entry Time:* 09:42 AM | *Exit Time:* 02:45 PM\n\n"
     
