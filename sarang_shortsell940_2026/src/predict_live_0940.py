@@ -102,22 +102,25 @@ if __name__ == "__main__":
 
     # 3. Load Ban List
     banlist_path = '/home/ubuntu/banlist/fo_ban_list_historical.csv'
-    ban = pd.read_csv(banlist_path)
-    ban['date'] = pd.to_datetime(ban['date'], format='%d-%m-%Y').dt.strftime('%Y-%m-%d')
-    ban = ban[ban['date'] == today_str]
-    banned_stocks = ban['stock_name'].tolist()
-    live_df = live_df[~live_df['clean_stock'].isin(banned_stocks)].copy()
+    if os.path.exists(banlist_path):
+        ban = pd.read_csv(banlist_path)
+        ban['date'] = pd.to_datetime(ban['date'], format='%d-%m-%Y', errors='coerce').dt.strftime('%Y-%m-%d')
+        ban = ban[ban['date'] == today_str]
+        banned_stocks = ban['stock_name'].tolist()
+        live_df = live_df[~live_df['clean_stock'].isin(banned_stocks)].copy()
 
     # 4. Fetch Prev Close, Premarket (09:07), AND Today's Open (09:15) STRICTLY from MySQL
     print("Fetching prev_close and premarket (09:07) from scrapdata...")
     conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
-    
-    prev_date_str = '2026-09-03' # Hardcoded to yesterday for speed!
-    
-    cand_strs = ",".join([f"'{s}'" for s in live_df['clean_stock']])
-
-    # PREV CLOSE
     cursor = conn.cursor()
+
+    # Dynamic lookup of previous trading date from scrapdata
+    cursor.execute(f"SELECT MAX(date) FROM scrapdata WHERE date < '{today_str}'")
+    row = cursor.fetchone()
+    prev_date_str = str(row[0]) if row and row[0] else '2026-09-03'
+    print(f"Detected previous trading date in scrapdata: {prev_date_str}")
+
+    cand_strs = ",".join([f"'{s}'" for s in live_df['clean_stock']])
 
     # 1. PREV CLOSE
     cursor.execute(f"SELECT stockname, CAST(close AS DECIMAL(10,2)) FROM scrapdata WHERE date = '{prev_date_str}' AND TIME(time) >= '15:00:00' AND stockname IN ({cand_strs}) AND isvalid='TRUE'")
@@ -135,7 +138,6 @@ if __name__ == "__main__":
     opens_df = pd.DataFrame(res3, columns=['clean_stock', 'open_0915']).groupby('clean_stock').last().reset_index() if res3 else pd.DataFrame(columns=['clean_stock', 'open_0915'])
 
     cursor.close()
-    
     conn.close()
     
     live_df = live_df.merge(prev_close_df, on='clean_stock', how='inner')
@@ -144,7 +146,6 @@ if __name__ == "__main__":
     live_df = live_df.merge(premarket_df, on='clean_stock', how='left')
     live_df = live_df.merge(opens_df, on='clean_stock', how='inner')
     
-    # Force convert SQL Decimal objects back to pure Python Floats!
     float_cols = ['prev_close', 'premarket_price', 'open_0915']
     for col in float_cols:
         if col in live_df.columns:
@@ -152,7 +153,7 @@ if __name__ == "__main__":
 
     live_df['premarket_price'] = live_df['premarket_price'].fillna(live_df['open_0915'])
     
-    # Calculate Gaps & Arcs (Using PREMARKET Price for the Gap, matching historical training perfectly)
+    # Calculate Gaps & Arcs
     live_df['Gap_Pct'] = ((live_df['premarket_price'] - live_df['prev_close']) / live_df['prev_close']) * 100
     live_df['gap_abs'] = live_df['Gap_Pct'].abs()
     
@@ -160,7 +161,6 @@ if __name__ == "__main__":
     live_df['price_0940'] = live_df['open_0915'] * (1 + (live_df['morning_return'] / 100))
     live_df['morning_high_calc'] = live_df['price_0940'] + (live_df['open_0915'] * (live_df['morning_range'] / 100)) * (1 - (live_df['morning_range_pos'] / 100))
     
-    # Positive Arc Math (Spike from Prev Close)
     live_df['spike_from_prev_close_pct'] = ((live_df['morning_high_calc'] - live_df['prev_close']) / live_df['prev_close']) * 100
     live_df['fade_from_high_pct'] = ((live_df['morning_high_calc'] - live_df['price_0940']) / live_df['morning_high_calc']) * 100
     live_df['positive_half_circle_prev_close'] = live_df['spike_from_prev_close_pct'] * live_df['fade_from_high_pct']
@@ -178,18 +178,19 @@ if __name__ == "__main__":
 
     # 6. Extract R1/R3 Stats directly from the SHORT SELL Master Dataset
     short_data_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell940_2026/data/short_sell_ml_dataset_v2.csv'
-    short_df = pd.read_csv(short_data_path, low_memory=False)
-    short_df['is_win'] = (short_df['short_pnl_net'] > 0).astype(int)
-    stats_df = short_df.groupby('clean_stock').agg(
-        hist_count=('short_pnl_net', 'count'),
-        hist_avg_pnl=('short_pnl_net', 'mean'),
-        hist_win_rate=('is_win', 'mean')
-    ).reset_index()
+    if os.path.exists(short_data_path):
+        short_df = pd.read_csv(short_data_path, low_memory=False)
+        short_df['is_win'] = (short_df['short_pnl_net'] > 0).astype(int)
+        stats_df = short_df.groupby('clean_stock').agg(
+            hist_count=('short_pnl_net', 'count'),
+            hist_avg_pnl=('short_pnl_net', 'mean'),
+            hist_win_rate=('is_win', 'mean')
+        ).reset_index()
+        live_df = live_df.merge(stats_df, on='clean_stock', how='left')
     
-    live_df = live_df.merge(stats_df, on='clean_stock', how='left')
-    live_df['hist_count'] = live_df['hist_count'].fillna(100)
-    live_df['hist_avg_pnl'] = live_df['hist_avg_pnl'].fillna(0)
-    live_df['hist_win_rate'] = live_df['hist_win_rate'].fillna(0.50)
+    live_df['hist_count'] = live_df.get('hist_count', pd.Series(100)).fillna(100)
+    live_df['hist_avg_pnl'] = live_df.get('hist_avg_pnl', pd.Series(0)).fillna(0)
+    live_df['hist_win_rate'] = live_df.get('hist_win_rate', pd.Series(0.50)).fillna(0.50)
 
     # 7. Make Predictions
     print("Loading LightGBM Model...")
@@ -207,32 +208,42 @@ if __name__ == "__main__":
     X_live = live_df[expected_cols]
     live_df['ml_prob'] = model.predict_proba(X_live)[:, 1]
     
-    sel = live_df[live_df['ml_prob'] >= 0.53].copy()
-    sel['daily_rank'] = sel['ml_prob'].rank(method='first', ascending=False)
-    sel = sel.sort_values('daily_rank')
-    
-    primary_targets = sel[sel['daily_rank'].isin([1, 4])]
-    supp_targets = sel[sel['daily_rank'].isin([2, 3, 5])]
+    live_df['daily_rank'] = live_df['ml_prob'].rank(method='first', ascending=False)
+    sel = live_df.sort_values('daily_rank').head(5).copy()
     
     tg_lines = []
-    tg_lines.append("📉 <b>09:40 SHORT SELL ALGO (₹ 1 CR MODEL)</b> 📉")
-    tg_lines.append(f"📅 <b>Date</b>: {today_str}")
+    tg_lines.append("📉 <b>09:40 SHORT SELL ALGO (GOLDEN 2026 BOOST MODEL)</b> 📉")
+    tg_lines.append(f"📅 <b>Date</b>: {today_str} | Entry: 09:42 AM IST")
     tg_lines.append("────────────────────────────")
     
-    if primary_targets.empty:
-        tg_lines.append("⚠️ <b>No highly probable Short targets met the 53% threshold today.</b>")
+    if sel.empty:
+        tg_lines.append("⚠️ <b>No Short Sell candidates met the criteria today.</b>")
     else:
-        tg_lines.append("🎯 <b>PRIMARY EXECUTION TARGETS (R1 & R4)</b>")
-        for _, row in primary_targets.iterrows():
-            tg_lines.append(f"✅ <b>RANK #{int(row['daily_rank'])}</b> | <b>{row['clean_stock']}</b> | Prob: {row['ml_prob']:.3f}")
-        
-        if not supp_targets.empty:
-            tg_lines.append("\n⚠️ <b>SUPPLEMENTARY TARGETS (R2, R3, R5 - USE CAUTION)</b>")
-            for _, row in supp_targets.iterrows():
-                tg_lines.append(f"   RANK #{int(row['daily_rank'])} | {row['clean_stock']} | Prob: {row['ml_prob']:.3f}")
+        tg_lines.append("🎯 <b>TOP 5 EXECUTABLE SHORT TARGETS (RANKS 1 to 5)</b>\n")
+        for _, row in sel.iterrows():
+            rk = int(row['daily_rank'])
+            stk = row['clean_stock']
+            prob = row['ml_prob']
+            gap = row.get('Gap_Pct', 0.0)
+            
+            if rk == 1:
+                label = "🌟 <b>RANK #1 (STAR TRAILING RUNNER)</b>"
+                rule = "SL 5.0% | Act 1.5% | Floor 1.0% | Giveback 0.3%"
+            elif rk in [2, 3, 4]:
+                label = f"⚡ <b>RANK #{rk} (SCALP TARGET / BLEED TRAILING)</b>"
+                rule = "Scalp TP 1.5% (SL 4.0%) / Bleed Trailing"
+            else:
+                label = f"🔹 <b>RANK #{rk}</b>"
+                rule = "Scalp TP 1.5% (SL 4.0%)"
+                
+            tg_lines.append(f"{label}\n  • Stock: <b>{stk}</b> | Prob: <code>{prob:.3f}</code> | Gap: <code>{gap:+.2f}%</code>\n  • Exit Rule: <i>{rule}</i>\n")
 
     tg_msg = "\n".join(tg_lines)
+    print("\nGenerated Telegram Message:")
+    print(tg_msg)
     send_telegram_alert(tg_msg)
     
-    sel[sel['daily_rank'] <= 5].to_csv('/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell940_2026/output/todays_short_targets.csv', index=False)
-    print("Targets saved successfully!")
+    out_file = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell940_2026/output/todays_short_targets.csv'
+    sel.to_csv(out_file, index=False)
+    print(f"\nTargets saved successfully to {out_file}!")
+
