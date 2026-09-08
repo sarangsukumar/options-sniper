@@ -30,6 +30,21 @@ An end-to-end, leak-free short-selling trading strategy and Machine Learning pip
 - **Max Drawdown:** **-₹2,68,397**
 - **Positive Years:** **100% (9 out of 9 Consecutive Years)**
 
+---
+
+## 📈 Multi-Period Win Rate Consistency Matrix
+
+| Time Horizon | **Combo 2: Ranks 2 to 4** *(3 Trades/Day)* | **Combo 3: All Top 5** *(5 Trades/Day)* | Consistency Benchmark |
+| :--- | :---: | :---: | :--- |
+| **Trade-Level Win Rate** | **62.53%** *(4,620 trades)* | **62.34%** *(7,687 trades)* | High trade-level edge (>62%) |
+| **Daily Win Rate** | **66.97%** *(1,040 / 1,553 days)* | **69.21%** *(1,079 / 1,559 days)* | ~7 out of 10 Trading Days in Profit |
+| **Weekly Win Rate** | **76.58%** *(340 / 444 weeks)* | **79.28%** *(352 / 444 weeks)* | ~8 out of 10 Trading Weeks in Profit |
+| **Monthly Win Rate** | **88.35%** *(91 / 103 months)* | **91.26%** *(94 / 103 months)* | **~9 out of 10 Months in Net Profit** |
+| **Quarterly Win Rate** | **100.00% (35 / 35 Quarters)** | **100.00% (35 / 35 Quarters)** | **100% Perfect Win Rate across all Quarters** |
+| **Yearly Win Rate** | **100.00% (9 / 9 Years)** | **100.00% (9 / 9 Years)** | **100% Perfect Positive Years (2018–2026)** |
+
+---
+
 ### 📅 Year-by-Year Walk-Forward Breakdown
 
 | Year | Trades | Win Rate (%) | Avg PnL / Trade | Total Net PnL (₹) |
@@ -50,7 +65,7 @@ An end-to-end, leak-free short-selling trading strategy and Machine Learning pip
 ## 🛠️ Step-by-Step Historical Rebuild Instructions
 
 ### Step 1: Rebuild Dataset (`build_dataset_v3.py`)
-Generates `short_sell_ml_dataset_v3.csv` by combining candidate universe filtering, prior-day indicators, and 09:15–09:40 AM morning intraday technicals.
+Generates `short_sell_ml_dataset_v3.csv.gz` by combining candidate universe filtering, prior-day indicators, and 09:15–09:40 AM morning intraday technicals.
 ```bash
 python3 build_dataset_v3.py
 ```
