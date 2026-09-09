@@ -292,60 +292,6 @@ def main():
     msg += "🚀 *Action:* Place Short Sell limit order at 09:42 AM!"
     
     send_telegram_alert(msg)
-    
-    # 9. Auto-insert Short Sell Orders into markets.orders for Broker Execution
-    try:
-        conn = pymysql.connect(
-            host='localhost',
-            user='root',
-            password='root',
-            database='markets'
-        )
-        cursor = conn.cursor()
-        
-        # Clear existing today's short sell orders to avoid duplicates
-        cursor.execute("DELETE FROM orders WHERE simulationtime = %s AND type = 'SELL' AND USER IN ('MANISHA', 'ZCK30')", (today_str,))
-        
-        insert_query = """
-            INSERT INTO orders (
-                stockname, price, quantity, type, ismarket, stoplossprice,
-                limitprice, limitprice_original, simulationtime, credate,
-                isvalid, is_future, USER, order_rank
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s, %s
-            )
-        """
-        
-        # Load lot sizes
-        lot_sizes = {}
-        if os.path.exists('/home/ubuntu/KotakCodes1/ICICImaster.csv'):
-            master_df = pd.read_csv('/home/ubuntu/KotakCodes1/ICICImaster.csv')
-            if 'stockname' in master_df.columns and 'lotsize' in master_df.columns:
-                lot_sizes = dict(zip(master_df['stockname'].str.strip(), master_df['lotsize']))
-                
-        inserted_cnt = 0
-        for idx, row in alpha_top3.iterrows():
-            stockname = row['clean_stock']
-            price = float(row['morning_close'])
-            qty = int(lot_sizes.get(stockname, 1))
-            rank_label = f"TL_{row['rank']}_sarang_v5"
-            
-            cursor.execute(insert_query, (
-                stockname, price, qty, 'SELL', 'FALSE', 0.0,
-                price, price, today_str, today_str,
-                'FALSE', 'TL', 'MANISHA', rank_label
-            ))
-            inserted_cnt += 1
-            print(f"  ✔ Inserted Short Sell Order: {stockname} | Qty: {qty} | Price: ₹{price:,.2f} | Rank: #{row['rank']}")
-            
-        conn.commit()
-        cursor.close()
-        conn.close()
-        print(f"✅ Successfully inserted {inserted_cnt} Alpha Top 3 Short Sell orders into markets.orders table for live execution!")
-    except Exception as e:
-        print(f"⚠️ Failed to insert orders into markets.orders: {e}")
 
 if __name__ == '__main__':
     main()
