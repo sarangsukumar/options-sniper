@@ -274,22 +274,21 @@ def main():
     top_ranked = df_features.sort_values('prob_win', ascending=False).reset_index(drop=True)
     top_ranked['rank'] = top_ranked.index + 1
     
-    alpha_top3 = top_ranked[top_ranked['rank'].isin([1, 2, 4])].reset_index(drop=True)
-    standard_top3 = top_ranked[top_ranked['rank'].isin([1, 2, 3])].reset_index(drop=True)
+    top4 = top_ranked[top_ranked['rank'].isin([1, 2, 3, 4])].reset_index(drop=True)
     
     # 8. Build Telegram Alert Message
     msg = f"🔥 *SHORT SELL MODEL v5 LIVE SIGNALS ({today_str})*\n"
     msg += f"⏰ *Entry Time:* 09:42 AM | *Exit Time:* 02:45 PM\n\n"
-    msg += f"⭐ *RECOMMENDED ALPHA TOP 3 PICKS (Ranks 1, 2, 4):*\n"
+    msg += f"⭐ *HIGH CONVICTION TOP 4 PICKS (Ranks 1, 2, 3, 4):*\n\n"
     
-    for idx, row in alpha_top3.iterrows():
+    for idx, row in top4.iterrows():
         msg += f"*{row['rank']}. {row['clean_stock']}* (Rank #{row['rank']})\n"
         msg += f"   • Win Prob: `{row['prob_win']*100:.1f}%`\n"
         msg += f"   • 09:40 Price: `₹{row['morning_close']:,.2f}`\n"
         msg += f"   • Pre-Market Fade: `{row['gap_fade_0907_to_940_pct']:+.2f}%`\n"
         msg += f"   • Morning Return: `{row['stock_ret_940']:+.2f}%`\n\n"
         
-    msg += "🚀 *Action:* Place Short Sell limit order at 09:42 AM!"
+    msg += "🚀 *Action:* Place Short Sell limit orders at 09:42 AM!"
     
     send_telegram_alert(msg)
 
