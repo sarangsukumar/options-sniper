@@ -40,8 +40,8 @@ warnings.filterwarnings('ignore')
 BASE_DIR = '/home/ubuntu/shortsellmodel940v5'
 MODEL_PATH = os.path.join(BASE_DIR, 'models', 'model_v5_lgb.txt')
 PNL_PATH = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/data/markets_pnl0325.csv'
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', 'YOUR_CHAT_ID_HERE')
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '5350311365:AAFkTUBR4IGvgS5Z9mJngz-mgk7-HkhFEYE')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '-698073972')
 
 def send_telegram_alert(message):
     if TELEGRAM_BOT_TOKEN == 'YOUR_BOT_TOKEN_HERE':
