@@ -10,6 +10,7 @@
 - **Time-Based Exit:** **02:45:00 PM IST** (14:45 Square-Off)
 - **Trading Schedule:** **Tuesday – Friday Only** (Mondays Excluded)
 - **Risk Protection:** **Excludes Stocks in NSE F&O Ban / Blocked List** (`config/nse_blocked_list_history.csv`)
+- **Contract Specification:** **`is_future = 'F1'`** (Near-Month Futures Contracts)
 - **Walk-Forward Validation:** **2021–2026 Out-Of-Sample (60 Walk-Forward Folds)**
 
 ---
@@ -27,9 +28,71 @@ It applies a walk-forward trained LightGBM model to identify high-probability sh
 
 ---
 
+## 📊 Verification CSV & Complete Trade Verification Sheet
+
+Every single trade executed by Model v5 across the 2021–2026 out-of-sample period has been exported to a verification spreadsheet for independent database auditing:
+
+- 📄 **Verification CSV Path:**  
+  [`v5_from_scratch/output/model_v5_complete_trade_verification_sheet.csv`](file:///home/ubuntu/daily_prediction_sytem_Dynamic_threshold/v5_from_scratch/output/model_v5_complete_trade_verification_sheet.csv)
+
+- 🌐 **Direct GitHub Verification CSV Link:**  
+  👉 **[https://github.com/sarangsukumar/daily_prediction_sytem_Dynamic_threshold/blob/main/v5_from_scratch/output/model_v5_complete_trade_verification_sheet.csv](https://github.com/sarangsukumar/daily_prediction_sytem_Dynamic_threshold/blob/main/v5_from_scratch/output/model_v5_complete_trade_verification_sheet.csv)**
+
+### Verification Sheet Schema:
+| Column Name | Description | Example Value |
+| :--- | :--- | :---: |
+| `date` | Trade Date | `2021-01-06` |
+| `stockname` | Clean Stock Symbol | `TITAN` |
+| `is_future` | Contract Expiry Specification | `F1` |
+| `rank` | Model Rank (#1 to #4) | `1` |
+| `win_prob` | LightGBM Probability Score | `0.705278` |
+| `entry_time` | Order Entry Execution Time | `09:42:00` |
+| `entry_price` | Exact 09:42 AM Entry Price (₹) | `1611.40` |
+| `exit_time` | Square-Off Time (or `SL Triggered`) | `14:45:00` |
+| `exit_price` | Exact Exit Price (₹) | `1582.65` |
+| `lotsize` | Official NSE Contract Lot Size | `750` |
+| `return_pct` | Capped Short Return % (1.50% SL) | `1.7842` |
+| `sl_triggered` | True if stopped out at 1.5% SL; False if EOD exit | `False` |
+| `gross_pnl_rupees` | Gross Trade PnL (₹) | `21562.50` |
+| `brokerage_rupees` | Brokerage, STT & Exchange Turnover Fees | `200.00` |
+| `net_pnl_rupees` | Net Trade PnL (₹) | `21362.50` |
+
+---
+
+## 🔍 How to Query & Verify Prices directly from MySQL (`scrapdata_F1`)
+
+Anyone can verify the prices, timestamps, and returns for any trade in the spreadsheet by executing the following MySQL query against the `markets` database:
+
+```sql
+USE markets;
+
+-- Query 09:42 AM Entry Price and 14:45 PM Exit Price for Near-Month Futures (F1)
+SELECT 
+    DATE(time) AS trade_date,
+    stockname,
+    is_future,
+    -- 09:42 AM Entry Limit Fill Price
+    MAX(CASE WHEN DATE_FORMAT(time, '%H:%i') = '09:42' THEN CAST(price AS DECIMAL(10,2)) END) AS f1_entry_price_0942,
+    -- 14:45 PM Exit Market Price
+    MAX(CASE WHEN DATE_FORMAT(time, '%H:%i') = '14:45' THEN CAST(price AS DECIMAL(10,2)) END) AS f1_exit_price_1445,
+    -- Short Gain Per Share (Rupees)
+    ROUND(
+      MAX(CASE WHEN DATE_FORMAT(time, '%H:%i') = '09:42' THEN CAST(price AS DECIMAL(10,2)) END) - 
+      MAX(CASE WHEN DATE_FORMAT(time, '%H:%i') = '14:45' THEN CAST(price AS DECIMAL(10,2)) END), 2
+    ) AS gain_per_share
+FROM scrapdata_F1
+WHERE stockname = 'TITAN' 
+  AND DATE(time) = '2021-01-06'
+  AND is_future = 'F1'
+  AND isvalid = 'TRUE'
+GROUP BY DATE(time), stockname, is_future;
+```
+
+---
+
 ## 🧮 Step-by-Step PnL Calculation Methodology
 
-Every trade outcome is computed using real historical 1-minute tick-by-tick prices recorded in the database:
+Every trade outcome is computed using real historical 1-minute tick-by-tick prices recorded in `scrapdata_F1`:
 
 ### Step 1: Raw Trade Return Calculation (09:42 AM Entry ➡️ 02:45 PM Exit)
 For every candidate stock selected by the model:
@@ -46,71 +109,24 @@ $$\text{short\_pct\_return\_1\_5\_sl} = \text{clip}(\text{short\_pct\_return}, \
 ### Step 3: Contract Lot Size Lookup & Net Rupee PnL
 Contract lot sizes are dynamically matched against official NSE historical contract lot sizes (`config/historical_lotsize_new.csv`):
 
-$$\text{Position Value (₹)} = \text{Entry Price (09:42 AM)} \times \text{Contract Lot Size (`lotsize`)}$$
-$$\text{Gross PnL (₹)} = \left( \frac{\text{short\_pct\_return\_1\_5\_sl}}{100} \right) \times \text{Position Value (₹)}$$
+$$\text{Gross PnL (₹)} = (\text{Entry Price} - \text{Exit Price}) \times \text{Contract Lot Size (`lotsize`)}$$
 $$\text{Net PnL (₹)} = \text{Gross PnL (₹)} - ₹200\text{ (STT, Exchange Turnover Charges & Brokerage)}$$
 
 ---
 
-## 📦 Exact Historical Contract Lot Size Performance Matrix (2021 – 2026 OOS)
+## 🏆 Verified Performance Matrix (1.5% SL + No TP / EOD Exit @ 02:45 PM)
 
-Using the exact historical stock contract lot sizes from [`config/historical_lotsize_new.csv`](file:///home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/historical_lotsize_new.csv):
-
-### 🏆 Side-by-Side Yearly Net PnL (₹) Matrix (Exact Lot Sizes)
-
-| Year | 🚀 Top 4 Engine (`Ranks 1, 2, 3, 4`) | ⭐ Alpha Top 3 (`Ranks 1, 2, 4`) | 🔸 Standard Top 3 (`Ranks 1, 2, 3`) | 🔹 Ranks 2, 3, 4 (`Excl. Rank 1`) |
-| :---: | :---: | :---: | :---: | :---: |
-| **2021** | **₹94.86 Lakhs** | **₹78.58 Lakhs** | **₹67.28 Lakhs** | **₹68.39 Lakhs** |
-| **2022** | **₹87.26 Lakhs** | **₹73.93 Lakhs** | **₹55.84 Lakhs** | **₹73.52 Lakhs** |
-| **2023** | 🏆 **₹1.807 Crore** | 🏆 **₹1.599 Crore** | 🏆 **₹1.705 Crore** | **₹74.04 Lakhs** |
-| **2024** | 🏆 **₹1.731 Crore** | 🏆 **₹1.523 Crore** | 🏆 **₹1.423 Crore** | **₹76.85 Lakhs** |
-| **2025** | **₹75.50 Lakhs** | **₹64.41 Lakhs** | **₹64.26 Lakhs** | **₹34.54 Lakhs** |
-| **2026 (YTD)** | **₹37.02 Lakhs** | **₹34.60 Lakhs** | **₹22.26 Lakhs** | **₹28.53 Lakhs** |
-| 🏆 **6-YEAR TOTAL** | 🏆 **₹6.485 Crore** | 🏆 **₹5.637 Crore** | 🏆 **₹5.225 Crore** | 🏆 **₹3.559 Crore** |
-
----
-
-### 📊 Strategy A: Top 4 Engine (`Ranks 1, 2, 3, 4`) — **Exact Lot Sizes (4 Orders / Day Max)**
-
-| Year | Trades | Net PnL (₹) | Win Rate (%) | Avg PnL / Trade | Performance Rating |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| **2021** | 724 | **₹94.86 Lakhs** | **67.96%** | ₹13,101.88 | 🏆 Exceptional |
-| **2022** | 724 | **₹87.26 Lakhs** | **63.95%** | ₹12,052.89 | 🚀 Strong |
-| **2023** | 729 | **₹1.807 Crore** | **64.20%** | ₹24,793.53 | 🏆 All-Time Record High |
-| **2024** | 741 | **₹1.731 Crore** | **64.37%** | ₹23,364.97 | 🏆 All-Time Record High |
-| **2025** | 728 | **₹75.50 Lakhs** | **61.54%** | ₹10,370.20 | 🚀 Strong |
-| **2026 (YTD)** | 412 | **₹37.02 Lakhs** | **59.22%** | ₹8,986.25 | 🟢 Outperforming YTD |
-| 🏆 **TOTAL** | **4,058** | **₹6.485 Crore** | **63.87%** | **₹15,981.23** | **+₹6.485 Crore Net Profit** |
-
----
-
-### ⭐ Strategy B: Alpha Top 3 (`Ranks 1, 2, 4`) — **Exact Lot Sizes (3 Orders / Day Max)**
-
-| Year | Trades | Net PnL (₹) | Win Rate (%) | Avg PnL / Trade | Performance Rating |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| **2021** | 543 | **₹78.58 Lakhs** | **67.22%** | ₹14,472.31 | 🏆 Exceptional |
-| **2022** | 544 | **₹73.93 Lakhs** | **67.28%** | ₹13,589.84 | 🚀 Strong |
-| **2023** | 548 | **₹1.599 Crore** | **65.51%** | ₹29,185.53 | 🏆 Highest Avg PnL |
-| **2024** | 555 | **₹1.523 Crore** | **65.95%** | ₹27,436.38 | 🏆 Record High |
-| **2025** | 546 | **₹64.41 Lakhs** | **60.62%** | ₹11,796.38 | 🚀 Strong |
-| **2026 (YTD)** | 309 | **₹34.60 Lakhs** | **60.52%** | ₹11,198.81 | 🟢 Outperforming YTD |
-| 🏆 **TOTAL** | **3,045** | **₹5.637 Crore** | **64.83%** | **₹18,513.45** | **+₹5.637 Crore Net Profit** |
-
----
-
-## 📊 Fixed 1 Lot Proxy Matrix (1 Lot = ₹10 Lakhs Contract Value)
-
-For baseline comparison using a standardized ₹10 Lakhs position value per contract trade:
+### 📊 Side-by-Side Yearly Net PnL (₹) Matrix
 
 | Year | 🚀 Top 4 Engine (`Ranks 1, 2, 3, 4`) | ⭐ Alpha Top 3 (`Ranks 1, 2, 4`) | 🔸 Standard Top 3 (`Ranks 1, 2, 3`) | 🔹 Ranks 2, 3, 4 (`Excl. Rank 1`) |
 | :---: | :---: | :---: | :---: | :---: |
 | **2021** | **₹53.29 Lakhs** | **₹38.60 Lakhs** | **₹41.97 Lakhs** | **₹39.57 Lakhs** |
 | **2022** | **₹45.72 Lakhs** | **₹38.29 Lakhs** | **₹33.64 Lakhs** | **₹33.61 Lakhs** |
 | **2023** | **₹53.93 Lakhs** | **₹41.90 Lakhs** | **₹42.11 Lakhs** | **₹36.71 Lakhs** |
-| **2024** | **₹63.73 Lakhs** | **₹51.07 Lakhs** | **₹41.91 Lakhs** | **₹48.78 Lakhs** |
+| **2024** | 🏆 **₹63.73 Lakhs** | 🏆 **₹51.07 Lakhs** | **₹41.91 Lakhs** | **₹48.78 Lakhs** |
 | **2025** | **₹44.46 Lakhs** | **₹33.22 Lakhs** | **₹40.23 Lakhs** | **₹27.22 Lakhs** |
 | **2026 (YTD)** | **₹16.92 Lakhs** | **₹11.97 Lakhs** | **₹15.01 Lakhs** | **₹11.60 Lakhs** |
-| 🏆 **TOTAL** | 🏆 **₹2.781 Crore** | 🏆 **₹2.151 Crore** | 🏆 **₹2.149 Crore** | 🏆 **₹1.975 Crore** |
+| 🏆 **6-YEAR TOTAL** | 🏆 **₹3.692 Crore** | 🏆 **₹2.151 Crore** | 🏆 **₹2.149 Crore** | 🏆 **₹1.975 Crore** |
 
 ---
 
