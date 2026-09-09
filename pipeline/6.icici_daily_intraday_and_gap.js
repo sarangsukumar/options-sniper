@@ -32,12 +32,12 @@ const ACCOUNT_CONFIGS = {
         sessionFile: "/home/ubuntu/KotakCodes1/ICICI/icici_session_token/icicisession_amrit.txt",
         otpScript: path.join(parentDir, 'auth', '2.OTP_Amrit.py')
     },
-    Manisha: {
-        name: "Manisha",
-        appKey: "1f3Pi887R1652C91_76J6808z8191jq~",
-        appSecret: "4d7(89!0_3~8+11%49J38+g340k99n2~",
-        sessionFile: "/home/ubuntu/KotakCodes1/ICICI/icici_session_token/icicisession_manisha.txt",
-        otpScript: path.join(parentDir, 'auth', '2.OTP_Manisha.py')
+    Bineesh: {
+        name: "Bineesh",
+        appKey: "S945YmT9K3Z4425450K+C205BMZ9$085",
+        appSecret: "6P9^377d3*412585q(527i3ZgJ437040",
+        sessionFile: "/home/ubuntu/KotakCodes1/ICICI/icici_session_token/icicisession_bineesh.txt",
+        otpScript: path.join('/home/ubuntu/KotakCodes1/ICICI', '2.OTP_Bineesh.py')
     }
 };
 
@@ -134,8 +134,8 @@ async function authenticateOrRenew() {
             } catch (err2) {
                 const err_msg = err2.message || "Unknown generateSession error";
                 if (activeAccountName === "Amrit") {
-                    console.warn(`[Account Failover] Triggering backup account (Manisha) switch...`);
-                    await switchAccount("Manisha");
+                    console.warn(`[Account Failover] Triggering backup account (Bineesh) switch...`);
+                    await switchAccount("Bineesh");
                     isRenewingSession = false;
                     return authenticateOrRenew();
                 } else {
@@ -197,11 +197,10 @@ function isQuotaExceededError(resp, err) {
 
 // ── CONCURRENT STOCK PROCESSING ───────────────────────────────────────────────
 async function processAllStocks(stockList, scripCodes, todayStr) {
-    const concurrency = 8;
+    const concurrency = 16;
     const allDbRows = [];
 
     const worker = async (stockName, index) => {
-        await delay(index * 30);
 
         if (!scripCodes.hasOwnProperty(stockName)) {
             console.log(`[${index + 1}/${stockList.length}] ${stockName} - Skipping: Not in masterfile.csv`);
