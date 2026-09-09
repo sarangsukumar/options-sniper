@@ -382,8 +382,32 @@ function runDataFetcherPipeline() {
                 const slicedRows = uniqueRows.slice(startIndex, endIndex !== null ? endIndex : uniqueRows.length);
                 console.log(`[Processing] Processing ${slicedRows.length} unique stocks (Index range: ${startIndex} to ${endIndex !== null ? endIndex : uniqueRows.length - 1})`);
 
-                // ── PRE-DELETE TARGET DATES TO PREVENT DUPLICATE ENTRIES ──
-                await new Promise((resDel, rejDel) => {
+                // ── SMART PRE-CHECK & DEDUPLICATION ──
+                if (!isCustomRange) {
+                    const todayObj = new Date();
+                    const yesterdayObj = new Date();
+                    yesterdayObj.setDate(todayObj.getDate() - 1);
+                    const yesterdayStr = yesterdayObj.toISOString().slice(0, 10);
+                    const todayStr = todayObj.toISOString().slice(0, 10);
+
+                    // Check if yesterday's data already exists in DB
+                    const checkYesterdaySql = `SELECT COUNT(*) as cnt FROM ${TABLENAME} WHERE date = ?`;
+                    await new Promise((resCheck) => {
+                        connection.query(checkYesterdaySql, [yesterdayStr], (err, rows) => {
+                            const cnt = (rows && rows[0] && rows[0].cnt) || 0;
+                            if (cnt > 5000) {
+                                console.log(`⚡ [Smart Cache] Found ${cnt} existing ticks for yesterday (${yesterdayStr}). Skipping yesterday's download!`);
+                                fromDate = todayStr; // Only fetch today's data!
+                            } else {
+                                console.log(`ℹ️ Yesterday's data missing/incomplete (${cnt} ticks). Will fetch both ${yesterdayStr} and ${todayStr}.`);
+                            }
+                            resCheck();
+                        });
+                    });
+                }
+
+                // Delete only the dates we are actually going to fetch
+                await new Promise((resDel) => {
                     const delSql = `DELETE FROM ${TABLENAME} WHERE date BETWEEN ? AND ?`;
                     connection.query(delSql, [fromDate, toDate], (errDel, resDelQuery) => {
                         if (errDel) {
