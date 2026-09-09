@@ -74,12 +74,12 @@ const ACCOUNT_CONFIGS = {
         sessionFile: path.join(parentDir, 'auth', 'icicisession.txt'),
         otpScript: path.join(parentDir, 'auth', '2.OTP_Amrit.py')
     },
-    Manisha: {
-        name: "Manisha",
-        appKey: "1f3Pi887R1652C91_76J6808z8191jq~",
-        appSecret: "4d7(89!0_3~8+11%49J38+g340k99n2~",
-        sessionFile: path.join(parentDir, 'auth', 'icicisession_Manisha.txt'),
-        otpScript: path.join(parentDir, 'auth', '2.OTP_Manisha.py')
+    Bineesh: {
+        name: "Bineesh",
+        appKey: "S945YmT9K3Z4425450K+C205BMZ9$085",
+        appSecret: "6P9^377d3*412585q(527i3ZgJ437040",
+        sessionFile: "/home/ubuntu/KotakCodes1/ICICI/icici_session_token/icicisession_bineesh.txt",
+        otpScript: path.join('/home/ubuntu/KotakCodes1/ICICI', '2.OTP_Bineesh.py')
     }
 };
 
@@ -298,10 +298,10 @@ async function renewSessionGlobal() {
         } catch (e) {
             console.error(`[Session Lock] Error renewing session for ${activeAccountName}:`, e.message || e);
             
-            // If primary (Amrit) failed or hit quota limit, failover to Manisha account
+            // If primary (Amrit) failed or hit quota limit, failover to Bineesh account
             if (activeAccountName === "Amrit") {
-                console.warn(`[Failover Triggered] Amrit account failed session renewal. Falling back to Manisha account...`);
-                await switchAccount("Manisha");
+                console.warn(`[Failover Triggered] Amrit account failed session renewal. Falling back to Bineesh account...`);
+                await switchAccount("Bineesh");
                 return renewSessionGlobal();
             }
 
@@ -381,6 +381,19 @@ function runDataFetcherPipeline() {
 
                 const slicedRows = uniqueRows.slice(startIndex, endIndex !== null ? endIndex : uniqueRows.length);
                 console.log(`[Processing] Processing ${slicedRows.length} unique stocks (Index range: ${startIndex} to ${endIndex !== null ? endIndex : uniqueRows.length - 1})`);
+
+                // ── PRE-DELETE TARGET DATES TO PREVENT DUPLICATE ENTRIES ──
+                await new Promise((resDel, rejDel) => {
+                    const delSql = `DELETE FROM ${TABLENAME} WHERE date BETWEEN ? AND ?`;
+                    connection.query(delSql, [fromDate, toDate], (errDel, resDelQuery) => {
+                        if (errDel) {
+                            console.error(`[DB Pre-Delete Warning] Could not delete old records:`, errDel.message);
+                        } else {
+                            console.log(`[DB Pre-Delete] Cleared ${resDelQuery.affectedRows} existing rows for range ${fromDate} to ${toDate} from ${TABLENAME}.`);
+                        }
+                        resDel();
+                    });
+                });
 
                 const checkpoint = loadCheckpoint();
                 let isResumeYear = false;
