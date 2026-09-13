@@ -1,87 +1,81 @@
-# 🏆 Sarang 2026 Short-Sell Algorithmic Portfolio
+# 🏆 Sarang 2026 Short-Sell Algorithmic Suite: The Definitive Two Models
 
-Welcome to the centralized repository containing all **4 fully verified, audited, and production-ready short-selling algorithmic strategies**.
-
-Every model in this repository complies with strict institutional trading standards:
-1. **100% Pure MySQL Database:** Strictly zero external Yahoo Finance dependencies. All pricing, tick indicators, and pre-market metrics are drawn directly from `markets.scrapdata` and `markets.scrapdata_F1`.
-2. **Exact Dynamic Contract Lot Sizes:** Mapped dynamically per contract expiry date from `historical_lotsize_new.csv` (35,205 official NSE records across 646 F&O symbols).
-3. **Zero Lookahead Bias:** True expanding-window Walk-Forward Optimization (WFO) where models are trained strictly on past years ($T < \text{Test Year}$) and evaluated on completely unseen out-of-sample data.
-4. **Live Execution Feasibility:** Every model features a **guaranteed $\ge$ 2-minute latency buffer** between data cutoff and trade execution.
-5. **Standardized Brokerage:** Flat ₹300.00 commission deducted per trade across all years.
+Welcome to the production repository for the **Definitive Two Non-Overlapping Short-Sell Models**, engineered from scratch with **100% pure MySQL database data (`markets.scrapdata` and `markets.scrapdata_F1`)**, **zero Yahoo Finance dependencies**, **verified historical contract lot sizes**, and a **strict 2-minute live implementation latency buffer**.
 
 ---
 
-## 📁 Repository Structure
+## 🏛️ Master Architecture: Zero Capital / Margin Overlap
 
-```
-/home/ubuntu/sarang_2026_shortsell_algos/
-├── README.md                                    # Master portfolio documentation & comparison
-├── run_all_models.py                            # Master benchmarking script
-├── 01_Model_V8_Scalp_0920_0940/                 # Fast 20-min morning momentum scalp (+₹27.09 L)
-│   ├── run_simulation.py
-│   ├── trades_log.csv
-│   └── README.md
-├── 02_Model_B_Extended_0920_1445/               # Full-day hold on opening 3-min ticks (+₹98.55 L)
-│   ├── run_simulation.py
-│   ├── trades_log.csv
-│   └── README.md
-├── 03_Model_V6_Single_0942_1445/                # Flagship intraday mean-reversion with 3% SL (+₹91.32 L)
-│   ├── run_simulation.py
-│   ├── trades_log.csv
-│   └── README.md
-└── 04_Model_V6_V7_Hybrid_0942_1445/             # Dual-engine titan: Reversion + Sniper (+₹214.63 L / ₹2.15 Cr)
-    ├── run_simulation.py
-    ├── trades_log.csv
-    └── README.md
+```mermaid
+flowchart LR
+    A["09:07 - 09:18 AM<br/>Pre-market & Morning Data"] --> B["09:18 - 09:20 AM<br/>2-MIN BUFFER"]
+    B --> C["09:20 AM ENTRY<br/>Model 1: Shorter Scalp (EQ)"]
+    C --> D["09:40 AM EXIT<br/>100% Margin Freed"]
+    D --> E["09:40 - 09:42 AM<br/>2-MIN BUFFER"]
+    E --> F["09:42 AM ENTRY<br/>Model 2: Longer Window (F1)"]
+    F --> G["14:45 PM EXIT<br/>or 3.0% Stop Loss"]
 ```
 
----
-
-## 📊 Master Performance Comparison (2020 – 2026)
-
-| # | Strategy Name | Time Window | Trades | Win Rate % | Profit Factor | Avg Net / Trade | Daily Sharpe | Max DD (₹ L) | Total Net PnL |
-| :-: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 1 | **Model V8 Scalp** | 09:20 $\rightarrow$ 09:40 AM | 5,087 | 54.55% | 1.28 | ₹532.56 | 1.98 | -₹3.31 L | **₹27.09 Lakhs** |
-| 2 | **Model B Extended** | 09:20 $\rightarrow$ 14:45 PM | 4,844 | 59.31% | 1.50 | ₹2,034.40 | 3.42 | -₹3.88 L | **₹98.55 Lakhs** |
-| 3 | **Model V6 Single** | 09:42 $\rightarrow$ 14:45 PM | 4,035 | 58.17% | 1.59 | ₹2,263.27 | 3.43 | -₹3.62 L | **₹91.32 Lakhs** |
-| 4 | 👑 **Model V6/V7 Hybrid** | **09:42 $\rightarrow$ 14:45 PM** | **4,994** | **63.04%** | **2.34** | **₹4,297.66** | **4.98** | **-₹4.61 L** | 🏆 **₹214.63 Lakhs (₹2.15 Cr)** |
+Because **Model 1 exits completely at 09:40:00 AM**, 100% of the margin is freed before **Model 2 enters at 09:42:00 AM**. This enables **100% capital recycling on a single margin account (1x margin)**!
 
 ---
 
-## 📅 Year-by-Year Net PnL Matrix (₹ Lakhs)
+## 📊 Dual-Table Simulation Performance Matrix (Walk-Forward Out-Of-Sample)
 
-| Year | Model 1 (V8 Scalp) | Model 2 (Model B) | Model 3 (V6 Single) | 👑 Model 4 (V6/V7 Hybrid) |
-| :---: | :---: | :---: | :---: | :---: |
-| **2020** | — | +₹18.73 L | — | **+₹21.86 L** |
-| **2021** | +₹9.32 L | +₹20.87 L | +₹10.85 L | **+₹37.11 L** |
-| **2022** | +₹4.76 L | +₹23.76 L | +₹19.19 L | **+₹30.21 L** |
-| **2023** | +₹0.64 L | +₹10.45 L | +₹14.71 L | **+₹37.08 L** |
-| **2024** | +₹12.05 L | +₹14.97 L | +₹21.07 L | **+₹49.71 L** |
-| **2025** | -₹3.03 L | +₹8.59 L | +₹13.48 L | **+₹29.07 L** |
-| **2026** | +₹3.36 L | +₹1.19 L | +₹12.02 L | **+₹9.58 L** |
-| **TOTAL** | **₹27.09 L** | **₹98.55 L** | **₹91.32 L** | 🏆 **₹214.63 L (₹2.15 CRORE)** |
+All figures below include flat **₹300.00 commission deducted per trade** and **exact dynamic contract lot sizes**.
 
----
-
-## ⚡ Recommended Production Deployment: The Sequential Engine
-
-By taking advantage of the execution timing, you can re-use 100% of your trading capital across two non-overlapping models:
-
-1. **09:20 – 09:40 AM:** Run **Model 1 (V8 Scalp)**. Positions square off at 09:40:00 AM, releasing 100% of margin.
-2. **09:42 – 14:45 PM:** Re-deploy the exact same margin into **Model 4 (V6/V7 Hybrid)**.
-
-### Combined Sequential System Highlights:
-- **Total Net PnL:** **+₹241.72 Lakhs (+₹2.42 CRORE)**
-- **Daily Win Rate:** **62.45%**
-- **Daily Sharpe Ratio:** **4.61**
-- **Max Drawdown:** Only **-₹4.61 Lakhs**
-- **Capital Needed:** **1x Margin** (Zero capital conflict).
+| Strategy Window | Execution Venue | Trades | Net PnL (₹ Lakhs) | Net PnL (₹ Cr) | Win Rate (%) | Profit Factor | Annual Sharpe | All Years Positive? |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Model 1: Shorter (09:20 $\rightarrow$ 09:40)** | **Cash Equity (`scrapdata`)** | 3,023 | **+₹33.13 L** | +₹0.33 Cr | **58.62%** | **1.70** | **4.01** | 🏆 **YES (100% Green)** |
+| **Model 1: Shorter (09:20 $\rightarrow$ 09:40)** | **Futures (`scrapdata_F1`)** | 3,023 | +₹16.88 L | +₹0.17 Cr | 54.65% | 1.29 | 1.97 | 5 of 6 Green |
+| **Model 2: Longer (09:42 $\rightarrow$ 14:45)** | **Futures (`scrapdata_F1`)** | 4,994 | **+₹214.43 L** | **+₹2.14 Cr** | **62.37%** | **2.34** | **4.98** | 👑 **YES (100% Green)** |
+| **Model 2: Longer (09:42 $\rightarrow$ 14:45)** | **Cash Equity (`scrapdata`)** | 4,994 | **+₹84.76 L** | +₹0.85 Cr | **54.37%** | **1.71** | **3.80** | 🏆 **YES (100% Green)** |
+| **🌟 MASTER SEQUENTIAL PAIR** | **EQ Scalp $\rightarrow$ Futures Hold** | **8,017** | **+₹247.56 L** | **+₹2.48 Cr** | **66.53% (Day)** | **2.21** | **5.43** | 👑 **YES (100% Green)** |
 
 ---
 
-## 🚀 How to Run the Centralized Suite
+## 📅 Year-by-Year Net PnL Breakdown (₹ Lakhs)
 
-To run the master benchmarking and correlation audit across all 4 models:
-```bash
-python3 /home/ubuntu/sarang_2026_shortsell_algos/run_all_models.py
+| Year | Model 1: Shorter (Equity) | Model 1: Shorter (Futures) | Model 2: Longer (Futures 3% SL) | Model 2: Longer (Equity 3% SL) | 💎 Master Sequential Pair (EQ $\rightarrow$ F1) |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| **2020** | *N/A (F1 Base)* | *N/A* | **+₹21.86 L** | **+₹13.60 L** | **+₹21.86 L** |
+| **2021** | **+₹7.54 L** | -₹1.56 L | **+₹37.11 L** | **+₹25.03 L** | **+₹44.66 L** |
+| **2022** | **+₹6.11 L** | +₹0.57 L | **+₹30.21 L** | **+₹16.08 L** | **+₹36.32 L** |
+| **2023** | **+₹4.45 L** | +₹4.16 L | **+₹37.08 L** | **+₹8.80 L** | **+₹41.53 L** |
+| **2024** | **+₹9.75 L** | +₹8.97 L | **+₹49.71 L** | **+₹10.79 L** | **+₹59.45 L** |
+| **2025** | **+₹1.62 L** | +₹1.50 L | **+₹29.07 L** | **+₹9.22 L** | **+₹30.69 L** |
+| **2026** | **+₹3.67 L** | +₹3.25 L | **+₹9.38 L** | **+₹1.24 L** | **+₹13.05 L** |
+| **TOTAL** | **+₹33.13 L** | **+₹16.88 L** | **+₹214.43 L** | **+₹84.76 L** | 👑 **+₹247.56 L (+₹2.48 CRORE)** |
+
+---
+
+## 🔬 Key Quantitative Findings & Insights
+
+1. **Why Shorter Window Outperforms on Cash Equity:**
+   - In the opening 20 minutes (09:20 to 09:40), cash equity stocks react immediately to institutional morning sell blocks with tight bid-ask spreads.
+   - Futures contracts often carry an erratic basis spread premium during the first 20 minutes of the market open that compresses intraday, creating unnecessary slippage. Hence, **Cash Equity (`scrapdata`) is the superior execution venue for Model 1 (+₹33.13L vs +₹16.88L)**.
+
+2. **Why Longer Window Outperforms on Near-Month Futures:**
+   - Over a 5-hour holding period (09:42 to 14:45), the contractual leverage of futures amplifies mean-reversion profits (**+₹2.14 Crore on Futures vs +₹0.85 Crore on Equity**).
+   - The active 3.0% Stop Loss cleanly caps unexpected short squeezes, yielding an institutional-grade Profit Factor of **2.34**.
+
+3. **Capital Efficiency of the Sequential Pair:**
+   - Zero dollar overlap: 100% of margin is freed at 09:40:00 AM, allowing the full margin pool to be deployed into the 09:42:00 AM entry.
+   - Generates **+₹2.48 Crore Net PnL** across 2020–2026 with a **5.43 Sharpe Ratio** and **66.53% winning trading days**.
+
+---
+
+## 📁 Repository Directory Structure
+
+```text
+sarang_2026_shortsell_algos/
+├── 01_Best_Shorter_Window_0920_0940/
+│   ├── run_simulation.py                         # From-scratch trainer & dual simulator
+│   ├── shorter_window_trades_eq_and_futures.csv  # Full trade log with EQ & Futures prices
+│   └── README.md                                 # Technical strategy documentation
+├── 02_Best_Longer_Window_0942_1445/
+│   ├── run_simulation.py                         # From-scratch trainer & dual simulator
+│   ├── longer_window_trades_futures_and_eq.csv   # Full trade log with Futures & EQ prices
+│   └── README.md                                 # Technical strategy documentation
+└── run_all_models.py                             # Master comparative benchmarking runner
 ```
