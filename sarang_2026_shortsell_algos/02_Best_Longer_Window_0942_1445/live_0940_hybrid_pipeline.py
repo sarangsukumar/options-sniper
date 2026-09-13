@@ -346,7 +346,7 @@ def main():
     parser = argparse.ArgumentParser(description="Live 09:40 AM Hybrid Prediction Engine")
     parser.add_argument('--date', type=str, default=None, help="Target date YYYY-MM-DD")
     parser.add_argument('--force-monday', action='store_true', help="Force execution even on Monday")
-    parser.add_argument('--custom-limit', action='store_true', help="Filter candidates to only Custom Limit fills from markets_pnl0325.csv")
+    parser.add_argument('--whole-universe', action='store_true', help="Force scanning entire F&O universe instead of Custom Limit fills")
     args = parser.parse_args()
 
     print("===================================================================================")
@@ -376,21 +376,26 @@ def main():
         send_telegram_msg(notice)
         return
 
-    # Check candidate filtering mode
+    # Check candidate filtering mode:
+    # Proven Historical Edge (+₹2.36 Crore, 72.3% Win Rate) is based on Custom Limit Met Orders.
     cand_filter = None
-    if args.custom_limit:
-        pnl_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/data/markets_pnl0325.csv'
-        if os.path.exists(pnl_path):
-            pnl_df = pd.read_csv(pnl_path)
-            pnl_df['parsed_dt'] = pd.to_datetime(pnl_df['simulationdate'], format='mixed', dayfirst=True, errors='coerce')
+    pnl_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/data/markets_pnl0325.csv'
+    if not args.whole_universe and os.path.exists(pnl_path):
+        pnl_df = pd.read_csv(pnl_path)
+        pnl_df['parsed_dt'] = pd.to_datetime(pnl_df['simulationdate'], format='mixed', dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
+        today_pnl = pnl_df[pnl_df['parsed_dt'] == target_date_str]
+        if len(today_pnl) == 0:
             latest_sim_dt = pnl_df['parsed_dt'].max()
-            cl_df = pnl_df[(pnl_df['parsed_dt'] == latest_sim_dt) & (pnl_df['sell_exec_type'].astype(str).str.contains('Custom Limit'))]
+            today_pnl = pnl_df[pnl_df['parsed_dt'] == latest_sim_dt]
+        
+        cl_df = today_pnl[today_pnl['sell_exec_type'].astype(str).str.contains('Custom Limit')]
+        if len(cl_df) > 0:
             cand_filter = cl_df['stockname'].astype(str).str.strip().str.upper().unique().tolist()
-            print(f"\n⚙️ MODE: CUSTOM LIMIT FILLS ONLY ({len(cand_filter)} stocks from {latest_sim_dt.strftime('%Y-%m-%d')})")
+            print(f"\n⚙️ CANDIDATE MODE: CUSTOM LIMIT MET ORDERS ({len(cand_filter)} stocks matching +₹2.36 Cr historical simulation)")
         else:
-            print(f"\n⚙️ MODE: WHOLE UNIVERSE (markets_pnl0325.csv not found)")
+            print(f"\n⚙️ CANDIDATE MODE: WHOLE UNIVERSE (No Custom Limit fills recorded for {target_date_str})")
     else:
-        print("\n⚙️ MODE: WHOLE UNIVERSE (All Active F&O Contracts)")
+        print("\n⚙️ CANDIDATE MODE: WHOLE UNIVERSE (All Active F&O Contracts)")
 
     # 2. Fetch live data
     print(f"1. Fetching live MySQL data for {target_date_str} ({day_name})...")
