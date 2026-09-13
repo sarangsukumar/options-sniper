@@ -86,8 +86,13 @@ def send_telegram_msg(msg):
     else:
         print(f"Warning: Bot script {BOT_SCRIPT} not found.")
 
-def fetch_live_data(target_date_str):
+def fetch_live_data(target_date_str, candidate_filter=None):
     """Fetch previous day indicators and today's morning ticks from MySQL markets DB."""
+    cand_clause = ""
+    if candidate_filter and len(candidate_filter) > 0:
+        cands_formatted = ", ".join([f"'{s.strip().upper()}'" for s in candidate_filter])
+        cand_clause = f" AND TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) IN ({cands_formatted}) "
+
     conn = get_db_connection()
     with conn.cursor() as cursor:
         # 1. Determine prior trading date
@@ -104,6 +109,7 @@ def fetch_live_data(target_date_str):
         FROM scrapdata_F1
         WHERE date = '{prev_date}' AND isvalid = 'TRUE'
           AND stockname NOT IN ('NIFTY 50', 'NIFTY BANK', 'NIFTY', 'BANKNIFTY', 'FINNIFTY')
+          {cand_clause}
         ORDER BY time ASC
         """
         cursor.execute(q_prev)
@@ -116,6 +122,7 @@ def fetch_live_data(target_date_str):
                CAST(price AS DECIMAL(10,2)) as price_0907
         FROM scrapdata_F1
         WHERE date = '{target_date_str}' AND time = '{target_date_str} 09:07:00' AND isvalid = 'TRUE'
+          {cand_clause}
         """
         cursor.execute(q_0907)
         rows_0907 = cursor.fetchall()
@@ -127,6 +134,7 @@ def fetch_live_data(target_date_str):
                    CAST(price AS DECIMAL(10,2)) as price_0907
             FROM scrapdata
             WHERE date = '{target_date_str}' AND time = '{target_date_str} 09:07:00' AND isvalid = 'TRUE'
+              {cand_clause}
             """
             cursor.execute(q_0907_eq)
             df_0907 = pd.DataFrame(cursor.fetchall())
@@ -139,6 +147,7 @@ def fetch_live_data(target_date_str):
         WHERE date = '{target_date_str}' AND TIME(time) >= '09:15:00' AND TIME(time) <= '09:40:00'
           AND isvalid = 'TRUE'
           AND stockname NOT IN ('NIFTY 50', 'NIFTY BANK', 'NIFTY', 'BANKNIFTY', 'FINNIFTY')
+          {cand_clause}
         ORDER BY time ASC
         """
         cursor.execute(q_morn)
@@ -337,6 +346,7 @@ def main():
     parser = argparse.ArgumentParser(description="Live 09:40 AM Hybrid Prediction Engine")
     parser.add_argument('--date', type=str, default=None, help="Target date YYYY-MM-DD")
     parser.add_argument('--force-monday', action='store_true', help="Force execution even on Monday")
+    parser.add_argument('--custom-limit', action='store_true', help="Filter candidates to only Custom Limit fills from markets_pnl0325.csv")
     args = parser.parse_args()
 
     print("===================================================================================")
@@ -366,9 +376,25 @@ def main():
         send_telegram_msg(notice)
         return
 
+    # Check candidate filtering mode
+    cand_filter = None
+    if args.custom_limit:
+        pnl_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/data/markets_pnl0325.csv'
+        if os.path.exists(pnl_path):
+            pnl_df = pd.read_csv(pnl_path)
+            pnl_df['parsed_dt'] = pd.to_datetime(pnl_df['simulationdate'], format='mixed', dayfirst=True, errors='coerce')
+            latest_sim_dt = pnl_df['parsed_dt'].max()
+            cl_df = pnl_df[(pnl_df['parsed_dt'] == latest_sim_dt) & (pnl_df['sell_exec_type'].astype(str).str.contains('Custom Limit'))]
+            cand_filter = cl_df['stockname'].astype(str).str.strip().str.upper().unique().tolist()
+            print(f"\n⚙️ MODE: CUSTOM LIMIT FILLS ONLY ({len(cand_filter)} stocks from {latest_sim_dt.strftime('%Y-%m-%d')})")
+        else:
+            print(f"\n⚙️ MODE: WHOLE UNIVERSE (markets_pnl0325.csv not found)")
+    else:
+        print("\n⚙️ MODE: WHOLE UNIVERSE (All Active F&O Contracts)")
+
     # 2. Fetch live data
-    print(f"\n1. Fetching live MySQL data for {target_date_str} ({day_name})...")
-    df_prev_ticks, df_0907, df_morn_ticks = fetch_live_data(target_date_str)
+    print(f"1. Fetching live MySQL data for {target_date_str} ({day_name})...")
+    df_prev_ticks, df_0907, df_morn_ticks = fetch_live_data(target_date_str, candidate_filter=cand_filter)
 
     if len(df_morn_ticks) == 0:
         print(f"❌ Error: No morning ticks found for date {target_date_str} in scrapdata_F1.")
