@@ -86,7 +86,7 @@ def send_telegram_msg(msg):
     else:
         print(f"Warning: Bot script {BOT_SCRIPT} not found.")
 
-def fetch_live_data(target_date_str, candidate_filter=None):
+def fetch_live_data(target_date_str, prev_date_str, candidate_filter=None):
     """Fetch previous day indicators and today's morning ticks from MySQL markets DB."""
     cand_clause = ""
     if candidate_filter and len(candidate_filter) > 0:
@@ -95,19 +95,15 @@ def fetch_live_data(target_date_str, candidate_filter=None):
 
     conn = get_db_connection()
     with conn.cursor() as cursor:
-        # 1. Determine prior trading date
-        cursor.execute(f"SELECT MAX(date) as prev_date FROM scrapdata_F1 WHERE date < '{target_date_str}'")
-        row = cursor.fetchone()
-        prev_date = str(row['prev_date']) if row and row['prev_date'] else None
         print(f"   • Target Trading Date:    {target_date_str}")
-        print(f"   • Prior Trading Date:     {prev_date}")
+        print(f"   • Prior Trading Date:     {prev_date_str}")
 
-        # 2. Fetch prior day ticks to compute VWAP gap, return, and last-hour ROC
+        # 1. Fetch prior day ticks to compute VWAP gap, return, and last-hour ROC
         q_prev = f"""
         SELECT TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) as clean_stock,
                time, CAST(price AS DECIMAL(10,2)) as price
         FROM scrapdata_F1
-        WHERE date = '{prev_date}' AND isvalid = 'TRUE'
+        WHERE date = '{prev_date_str}' AND isvalid = 'TRUE'
           AND stockname NOT IN ('NIFTY 50', 'NIFTY BANK', 'NIFTY', 'BANKNIFTY', 'FINNIFTY')
           {cand_clause}
         ORDER BY time ASC
@@ -353,15 +349,19 @@ def main():
     print("🚀 LIVE 09:40 AM SHORT SELL HYBRID ENGINE (MODEL V6 + MODEL V7)")
     print("===================================================================================")
 
-    # 1. Determine target date
-    if args.date:
-        target_date_str = args.date
-    else:
-        conn = get_db_connection()
-        with conn.cursor() as cursor:
+    # 1. Determine target date and previous trading date from MySQL scrapdata_F1
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        if args.date:
+            target_date_str = args.date
+        else:
             cursor.execute("SELECT MAX(date) as max_dt FROM scrapdata_F1")
             target_date_str = str(cursor.fetchone()['max_dt'])
-        conn.close()
+
+        cursor.execute(f"SELECT MAX(date) as prev_date FROM scrapdata_F1 WHERE date < '{target_date_str}'")
+        row = cursor.fetchone()
+        prev_date_str = str(row['prev_date']) if row and row['prev_date'] else None
+    conn.close()
 
     target_dt = pd.to_datetime(target_date_str)
     day_name = target_dt.strftime('%A')
@@ -377,29 +377,30 @@ def main():
         return
 
     # Check candidate filtering mode:
-    # Proven Historical Edge (+₹2.36 Crore, 72.3% Win Rate) is based on Custom Limit Met Orders.
+    # CRITICAL: The simulation pipeline records trades in markets_pnl0325.csv under the BUY date (prev_date_str).
+    # Those positions exit on today's morning (09:15-09:40 AM) via Custom Limit Fill!
+    # Therefore, we match simulationdate in markets_pnl0325.csv with prev_date_str from scrapdata_F1!
     cand_filter = None
     pnl_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/data/markets_pnl0325.csv'
-    if not args.whole_universe and os.path.exists(pnl_path):
+    if not args.whole_universe and os.path.exists(pnl_path) and prev_date_str:
         pnl_df = pd.read_csv(pnl_path)
         pnl_df['parsed_dt'] = pd.to_datetime(pnl_df['simulationdate'], format='mixed', dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
-        today_pnl = pnl_df[pnl_df['parsed_dt'] == target_date_str]
-        if len(today_pnl) == 0:
-            latest_sim_dt = pnl_df['parsed_dt'].max()
-            today_pnl = pnl_df[pnl_df['parsed_dt'] == latest_sim_dt]
         
-        cl_df = today_pnl[today_pnl['sell_exec_type'].astype(str).str.contains('Custom Limit')]
+        # Exact match with previous trading day from DB:
+        prev_pnl = pnl_df[pnl_df['parsed_dt'] == prev_date_str]
+        cl_df = prev_pnl[prev_pnl['sell_exec_type'].astype(str).str.contains('Custom Limit')]
+        
         if len(cl_df) > 0:
             cand_filter = cl_df['stockname'].astype(str).str.strip().str.upper().unique().tolist()
-            print(f"\n⚙️ CANDIDATE MODE: CUSTOM LIMIT MET ORDERS ({len(cand_filter)} stocks matching +₹2.36 Cr historical simulation)")
+            print(f"\n⚙️ CANDIDATE MODE: CUSTOM LIMIT MET ORDERS ({len(cand_filter)} stocks matched on prev trading day {prev_date_str} in markets_pnl0325.csv)")
         else:
-            print(f"\n⚙️ CANDIDATE MODE: WHOLE UNIVERSE (No Custom Limit fills recorded for {target_date_str})")
+            print(f"\n⚙️ CANDIDATE MODE: WHOLE UNIVERSE (No Custom Limit fills found in markets_pnl0325 for {prev_date_str})")
     else:
         print("\n⚙️ CANDIDATE MODE: WHOLE UNIVERSE (All Active F&O Contracts)")
 
     # 2. Fetch live data
     print(f"1. Fetching live MySQL data for {target_date_str} ({day_name})...")
-    df_prev_ticks, df_0907, df_morn_ticks = fetch_live_data(target_date_str, candidate_filter=cand_filter)
+    df_prev_ticks, df_0907, df_morn_ticks = fetch_live_data(target_date_str, prev_date_str, candidate_filter=cand_filter)
 
     if len(df_morn_ticks) == 0:
         print(f"❌ Error: No morning ticks found for date {target_date_str} in scrapdata_F1.")
