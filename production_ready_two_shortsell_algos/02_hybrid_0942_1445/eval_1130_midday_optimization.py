@@ -32,6 +32,15 @@ def run_evaluation():
     base_pnl_lakhs = df_hyb['f1_net_pnl'].sum() / 1e5
     print(f"Baseline Net PnL (Hold to 14:45 PM): ₹{base_pnl_lakhs:.2f} Lakhs (+₹{base_pnl_lakhs/100:.2f} Cr)")
 
+    # Load entry price from dataset
+    ds_path = '/home/ubuntu/v5_from_scratch/data/short_sell_ml_dataset_v5_scratch.csv'
+    if os.path.exists(ds_path):
+        ds = pd.read_csv(ds_path, usecols=['date_str', 'clean_stock', 'short_entry_price'])
+        ds['clean_stock'] = ds['clean_stock'].astype(str).str.strip().str.upper()
+        ds = ds.drop_duplicates(subset=['date_str', 'clean_stock'])
+        df_hyb = pd.merge(df_hyb, ds, on=['date_str', 'clean_stock'], how='left')
+        df_hyb['entry_price'] = df_hyb['short_entry_price']
+
     conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
     q = """
     SELECT date, TRIM(BOTH '"' FROM TRIM(stockname)) as clean_stock, close as close_1130
@@ -48,8 +57,9 @@ def run_evaluation():
     m = pd.merge(df_hyb, df_1130, on=['date_str', 'clean_stock'], how='left')
 
     # Short position: loss if price > entry
+    lot_col = 'lotsize' if 'lotsize' in m.columns else 'dynamic_lotsize'
     m['loss_at_1130'] = m['close_1130'] > m['entry_price']
-    m['pnl_1130_exit'] = (m['entry_price'] - m['close_1130']) * m['dynamic_lotsize'] - 300.0
+    m['pnl_1130_exit'] = (m['entry_price'] - m['close_1130']) * m[lot_col] - 300.0
 
     # Policy 3: Cut loss at 11:30, else keep baseline exit
     m['pnl_opt_1130'] = np.where(m['loss_at_1130'] & m['close_1130'].notnull(), m['pnl_1130_exit'], m['f1_net_pnl'])
