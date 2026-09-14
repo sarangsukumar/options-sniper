@@ -177,7 +177,7 @@ def append_to_daily_ledger(target_date_str, top4_df):
         df_new.to_csv(LEDGER_CSV, index=False)
         print(f"✔ Created new persistent ledger: {LEDGER_CSV}")
 
-def run_scalp_pipeline(target_date_str=None):
+def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     start_time = datetime.now()
     print("=" * 75)
     print("⚡ 09:20 - 09:40 SCALP PREDICTION ENGINE (SESSION 1)")
@@ -378,7 +378,8 @@ def run_scalp_pipeline(target_date_str=None):
     ])
 
     tg_message = "\n".join(lines)
-    send_telegram_alert(tg_message)
+    if not no_telegram:
+        send_telegram_alert(tg_message)
 
     duration = (datetime.now() - start_time).total_seconds()
     print(f"\n🎉 09:20 Scalp Pipeline Completed Successfully in {duration:.2f} seconds.")
@@ -386,6 +387,7 @@ def run_scalp_pipeline(target_date_str=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="09:20 - 09:40 Scalp Engine Live Runner")
     parser.add_argument('--date', type=str, default=None, help="Target Date YYYY-MM-DD (defaults to latest in DB)")
+    parser.add_argument('--no-telegram', action='store_true', help="Skip sending Telegram alert")
     args = parser.parse_args()
 
-    run_scalp_pipeline(target_date_str=args.date)
+    run_scalp_pipeline(target_date_str=args.date, no_telegram=args.no_telegram)

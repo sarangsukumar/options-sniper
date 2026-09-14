@@ -55,7 +55,7 @@ def send_telegram_alert(msg):
     else:
         print("ℹ️ Telegram bot script not found; notification skipped.")
 
-def reconcile_scalp_trades(target_date=None, force_all=False):
+def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False):
     if not os.path.exists(LEDGER_CSV):
         print(f"❌ Error: Ledger file not found at {LEDGER_CSV}")
         return
@@ -189,12 +189,14 @@ def reconcile_scalp_trades(target_date=None, force_all=False):
             f"🏆 <b>FINAL NET PNL:</b> <b>₹{day_net:+,.2f}</b>",
             f"📈 <b>Daily Win Rate:</b> <b>{win_rate:.1f}%</b> ({wins} Wins / {losses} Losses)"
         ])
-        send_telegram_alert("\n".join(tg_lines))
+        if not no_telegram:
+            send_telegram_alert("\n".join(tg_lines))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="09:20 - 09:40 Scalp Engine Evening Reconciler")
     parser.add_argument('--date', type=str, default=None, help="Target Date YYYY-MM-DD (defaults to all PENDING)")
     parser.add_argument('--force-all', action='store_true', help="Re-reconcile even if already completed")
+    parser.add_argument('--no-telegram', action='store_true', help="Skip sending Telegram alert")
     args = parser.parse_args()
 
-    reconcile_scalp_trades(target_date=args.date, force_all=args.force_all)
+    reconcile_scalp_trades(target_date=args.date, force_all=args.force_all, no_telegram=args.no_telegram)
