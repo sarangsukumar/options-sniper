@@ -74,12 +74,17 @@ def main():
 
     # 4. SL3 Cache
     print("4. Mapping tick-by-tick 3.0% Stop Loss outcomes...", flush=True)
-    sl_res = pd.read_csv(CACHE_SL_FILE)
-    legacy_t = pd.read_csv(LEGACY_TRADES_FILE)
-    mk = pd.merge(sl_res, legacy_t[['date_str', 'clean_stock', 'lotsize']], on=['date_str', 'clean_stock'])
-    c_orig = np.where(mk['year'] >= 2026, 600.0, 300.0)
-    mk['points_3sl'] = (mk['net_pnl_3sl'] + c_orig) / mk['lotsize']
-    known_map = dict(zip(mk['date_str'] + '_' + mk['clean_stock'], mk['points_3sl']))
+    master_sl_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sl3_points_master.csv')
+    if os.path.exists(master_sl_file):
+        sl_master = pd.read_csv(master_sl_file)
+        known_map = dict(zip(sl_master['date'] + '_' + sl_master['stockname'], sl_master['points']))
+    else:
+        sl_res = pd.read_csv(CACHE_SL_FILE)
+        legacy_t = pd.read_csv(LEGACY_TRADES_FILE)
+        mk = pd.merge(sl_res, legacy_t[['date_str', 'clean_stock', 'lotsize']], on=['date_str', 'clean_stock'])
+        c_orig = np.where(mk['year'] >= 2026, 600.0, 300.0)
+        mk['points_3sl'] = (mk['net_pnl_3sl'] + c_orig) / mk['lotsize']
+        known_map = dict(zip(mk['date_str'] + '_' + mk['clean_stock'], mk['points_3sl']))
 
     # 5. Walk-Forward Expanding Training
     years = sorted(df[df['year'] >= 2020]['year'].unique())
