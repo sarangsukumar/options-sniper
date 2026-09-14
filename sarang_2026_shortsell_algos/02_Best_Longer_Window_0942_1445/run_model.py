@@ -20,11 +20,20 @@ import lightgbm as lgb
 
 warnings.filterwarnings('ignore')
 
-LOTS_FILE = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/historical_lotsize_new.csv'
-DATA_FILE = '/home/ubuntu/v5_from_scratch/data/short_sell_ml_dataset_v5_scratch.csv'
-PNL_FILE = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/data/markets_pnl0325.csv'
-CACHE_SL_FILE = '/home/ubuntu/V8_Hybrid_Engine/sl3_results.csv'
-LEGACY_TRADES_FILE = '/home/ubuntu/V6_V7_Hybrid_Standalone/supercharged_trades.csv'
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(SCRIPT_DIR, 'data')
+
+LOTS_FILE = os.path.join(DATA_DIR, 'historical_lotsize_new.csv')
+DATA_FILE = os.path.join(DATA_DIR, 'short_sell_ml_dataset_v5_scratch.csv.gz')
+if not os.path.exists(DATA_FILE):
+    DATA_FILE = os.path.join(DATA_DIR, 'short_sell_ml_dataset_v5_scratch.csv')
+
+PNL_FILE = os.path.join(DATA_DIR, 'markets_pnl0325.csv.gz')
+if not os.path.exists(PNL_FILE):
+    PNL_FILE = os.path.join(DATA_DIR, 'markets_pnl0325.csv')
+
+CACHE_SL_FILE = os.path.join(DATA_DIR, 'sl3_points_master.csv')
+LEGACY_TRADES_FILE = os.path.join(SCRIPT_DIR, 'audited_0940_hybrid_trades.csv')
 
 def main():
     t0 = time.time()
