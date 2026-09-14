@@ -5,13 +5,56 @@
 
 set -e
 
+# Export Node.js and system paths to guarantee compatibility with cron / scheduler
+export HOME="/home/ubuntu"
+export PYTHONPATH="/home/ubuntu/.local/lib/python3.10/site-packages:$PYTHONPATH"
+export PATH="/home/ubuntu/.nvm/versions/node/v18.20.8/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$DIR"
 
-echo "======================================================================"
-echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] Triggering 09:40 AM Hybrid Pipeline"
-echo "======================================================================"
+LOG_FILE="$DIR/cron_0940_hybrid.log"
 
-python3 live_0940_hybrid_pipeline.py >> "$DIR/cron_0940_hybrid.log" 2>&1
+echo "======================================================================" >> "$LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] 🚀 Starting 09:41 AM Hybrid Short-Sell Production Pipeline" >> "$LOG_FILE"
+echo "======================================================================" >> "$LOG_FILE"
 
-echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] Pipeline finished with exit code $?"
+# Detect trading dates
+TODAY_DATE=$(date +%Y-%m-%d)
+PREV_TRADING_DATE=$(python3 -c "
+import pymysql
+conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
+c = conn.cursor()
+c.execute(\"SELECT MAX(date) FROM scrapdata_F1 WHERE date < '$TODAY_DATE'\")
+row = c.fetchone()
+print(str(row[0]) if row and row[0] else '$TODAY_DATE')
+conn.close()
+")
+
+echo "• Today Date        : $TODAY_DATE" >> "$LOG_FILE"
+echo "• Prev Trading Date : $PREV_TRADING_DATE" >> "$LOG_FILE"
+
+# Step 1: Download latest F1 ticks up to 09:40 into scrapdata_F1
+# (Cleans partial morning ticks from 09:35 simulation to prevent duplicates)
+echo "[Step 1/2] Fetching F1 ticks up to 09:40 AM into scrapdata_F1..." >> "$LOG_FILE"
+cd /home/ubuntu/daily_prediction_sytem_Dynamic_threshold
+rm -f pipeline/checkpoint_F1*.json
+# Only pass TODAY_DATE so it deletes partial 09:35 ticks for TODAY only, leaving yesterday intact!
+if node pipeline/8.icicidatawithsession_F1.js "$TODAY_DATE" "$TODAY_DATE" >> "$LOG_FILE" 2>&1; then
+    echo "✔ Step 1 (F1 Ticks Downloader) completed successfully." >> "$LOG_FILE"
+else
+    echo "⚠️ Warning: Step 1 encountered an issue — continuing with existing DB ticks." >> "$LOG_FILE"
+fi
+
+# Step 2: Run 09:40 Hybrid ML Pipeline & Dispatch Telegram Alert
+echo "[Step 2/2] Running 09:40 Hybrid ML Pipeline & Order Formulator..." >> "$LOG_FILE"
+cd "$DIR"
+if python3 live_0940_hybrid_pipeline.py >> "$LOG_FILE" 2>&1; then
+    echo "✔ Step 2 (09:40 Hybrid ML Pipeline) completed successfully." >> "$LOG_FILE"
+else
+    echo "❌ Error: Step 2 failed." >> "$LOG_FILE"
+    exit 1
+fi
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] 🎉 09:41 AM Hybrid Short-Sell Pipeline Finished Successfully." >> "$LOG_FILE"
+echo "" >> "$LOG_FILE"

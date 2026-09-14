@@ -1,0 +1,3 @@
+clean_stock,lots_to_trade,signal_type,confidence,entry_price_0940,rank_v6,rank_v7,source,is_dual,is_quad,lotsize,total_quantity,stop_loss_3pct
+MCX,2,DUAL CONFIRMED 🎯,VERY HIGH (75.5% WR | 6.31 PF),3283.7,1,2,CL FILL,True,False,225,450,3382.21
+UPL,2,DUAL CONFIRMED 🎯,VERY HIGH (75.5% WR | 6.31 PF),571.0,2,1,CL FILL,True,False,1355,2710,588.13
