@@ -225,7 +225,8 @@ production_ready_two_shortsell_algos/
 │   ├── live_0920_scalp_pipeline.py            # Daily 09:20 live predictor, Telegram dispatcher & ledger appender
 │   ├── reconcile_0920_scalp_pnl.py            # Evening / post-trade reconciler & daily PnL auditor
 │   ├── daily_0920_live_ledger.csv             # Persistent master ledger tracking daily predictions vs actual PnL
-│   ├── run_0920_scalp_pipeline.sh             # Production shell script with 20s buffer
+│   ├── run_0920_scalp_pipeline.sh             # Production morning shell script (09:20:20 AM)
+│   ├── run_0920_evening_reconcile.sh          # Production reconcile shell script (09:41:20 AM)
 │   ├── train_walk_forward_scalp.py            # Walk-forward backtester & feature auditor
 │   └── audited_0920_0940_trades.csv           # 5,186 historical trades with dynamic lots
 ├── 02_hybrid_0942_1445/

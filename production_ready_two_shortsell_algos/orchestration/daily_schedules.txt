@@ -9,6 +9,10 @@
 # Square-off: 09:40:00 AM SHARP (100% Margin Released back to Cash)
 20 9 * * 1-5 bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/01_scalp_0920_0940/run_0920_scalp_pipeline.sh >> /home/ubuntu/cron_0920_scalp.log 2>&1
 
+# 1B. 09:20 SCALP RECONCILER & AUDIT REPORT
+# Runs at 09:41:20 AM IST right after scalp positions are squared off
+41 9 * * 1-5 bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/01_scalp_0920_0940/run_0920_evening_reconcile.sh >> /home/ubuntu/cron_0920_reconcile.log 2>&1
+
 # 2. 09:40 HYBRID DUAL ENGINE (V6 Reversion + V7 Premarket Fader Sniper)
 # Execution: Starts at 09:41:20 IST (20s buffer for 09:15-09:40 ICICI data ingestion)
 # Entry: 09:42:00 AM IST (Re-deploys ₹6.0L freed capital)
