@@ -34,6 +34,7 @@ MODEL_FILE = os.path.join(SCRIPT_DIR, 'lgb_0920_scalp_model.txt')
 LOTS_FILE = os.path.join(PROD_ROOT, 'config', 'historical_lotsize_new.csv')
 BOT_SCRIPT = '/home/ubuntu/KotakCodes1/status_Info_bot.js'
 OUTPUT_CSV = os.path.join(SCRIPT_DIR, 'live_0920_predictions_today.csv')
+LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0920_live_ledger.csv')
 
 FEATURES = [
     'prev_intraday_vwap_gap', 
@@ -123,6 +124,58 @@ def calc_arc_features(prices):
     pos_arcs = np.sum(changes > 0)
     total_arcs = len(changes)
     return float(pos_arcs / total_arcs) if total_arcs > 0 else 0.0
+
+def append_to_daily_ledger(target_date_str, top4_df):
+    """
+    Appends the daily Top 4 short-sell picks to daily_0920_live_ledger.csv with status PENDING.
+    Avoids duplicate entries if executed multiple times on the same date.
+    """
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    new_rows = []
+    for idx, row in top4_df.reset_index(drop=True).iterrows():
+        new_rows.append({
+            'date': target_date_str,
+            'rank': idx + 1,
+            'stockname': str(row['stockname']).strip().upper(),
+            'short_prob': round(float(row['short_prob']), 4),
+            'cmp_0919': round(float(row['cmp_0919']), 2),
+            'lotsize': int(row['lotsize']),
+            'entry_time': '09:21:00',
+            'entry_price': np.nan,
+            'exit_time': '09:41:00',
+            'exit_price': np.nan,
+            'gross_pnl': np.nan,
+            'charges': 300.0,
+            'net_pnl': np.nan,
+            'return_pct': np.nan,
+            'status': 'PENDING',
+            'predicted_at': now_str,
+            'reconciled_at': np.nan
+        })
+    df_new = pd.DataFrame(new_rows)
+    
+    if os.path.exists(LEDGER_CSV):
+        try:
+            df_existing = pd.read_csv(LEDGER_CSV)
+            if target_date_str in df_existing['date'].values:
+                already_completed = ((df_existing['date'] == target_date_str) & (df_existing['status'] == 'COMPLETED')).any()
+                if not already_completed:
+                    df_existing = df_existing[df_existing['date'] != target_date_str]
+                    df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                    df_combined.to_csv(LEDGER_CSV, index=False)
+                    print(f"✔ Daily ledger refreshed for {target_date_str} (Status: PENDING)")
+                else:
+                    print(f"ℹ️ Date {target_date_str} already reconciled in ledger; skipped overwriting.")
+            else:
+                df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                df_combined.to_csv(LEDGER_CSV, index=False)
+                print(f"✔ Daily predictions appended to persistent ledger: {LEDGER_CSV} (Status: PENDING)")
+        except Exception as e:
+            print(f"⚠️ Error updating ledger ({e}); writing fresh file.")
+            df_new.to_csv(LEDGER_CSV, index=False)
+    else:
+        df_new.to_csv(LEDGER_CSV, index=False)
+        print(f"✔ Created new persistent ledger: {LEDGER_CSV}")
 
 def run_scalp_pipeline(target_date_str=None):
     start_time = datetime.now()
@@ -294,6 +347,9 @@ def run_scalp_pipeline(target_date_str=None):
     # Save CSV output
     top4.to_csv(OUTPUT_CSV, index=False)
     print(f"\n✔ Plan saved to: {OUTPUT_CSV}")
+
+    # Append to Master Daily Ledger
+    append_to_daily_ledger(target_date_str, top4)
 
     # 6. Format and Send Telegram Message
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')

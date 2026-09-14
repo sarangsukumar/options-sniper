@@ -220,12 +220,14 @@ Our multi-year forensic grid search across >10,000 trades yielded six critical o
 production_ready_two_shortsell_algos/
 ├── README.md                                  # Complete from-scratch master instruction manual
 ├── 01_scalp_0920_0940/
-│   ├── fetch_morning_eq_ticks.js              # Real-time ICICI Breeze tick fetcher
-│   ├── lgb_0920_scalp_model.txt               # Pre-trained production LightGBM model
-│   ├── live_0920_scalp_pipeline.py            # Live scanner, ML predictor & Telegram dispatcher
+│   ├── extract_0920_features_from_db.py       # Zero-lookahead feature extraction from scrapdata
+│   ├── lgb_0920_scalp_model.txt               # Pre-trained production LightGBM model weights
+│   ├── live_0920_scalp_pipeline.py            # Daily 09:20 live predictor, Telegram dispatcher & ledger appender
+│   ├── reconcile_0920_scalp_pnl.py            # Evening / post-trade reconciler & daily PnL auditor
+│   ├── daily_0920_live_ledger.csv             # Persistent master ledger tracking daily predictions vs actual PnL
 │   ├── run_0920_scalp_pipeline.sh             # Production shell script with 20s buffer
 │   ├── train_walk_forward_scalp.py            # Walk-forward backtester & feature auditor
-│   └── audited_0920_0940_trades.csv           # 5,198 historical trades with dynamic lots
+│   └── audited_0920_0940_trades.csv           # 5,186 historical trades with dynamic lots
 ├── 02_hybrid_0942_1445/
 │   ├── live_0940_hybrid_pipeline.py           # Live V6+V7 scanner, dual-confirmed ranker & alerts
 │   ├── run_0940_hybrid_pipeline.sh            # Production shell script with 20s buffer
@@ -255,10 +257,13 @@ python3 02_hybrid_0942_1445/eval_1130_midday_optimization.py
 # 2. Run Scalp Walk-Forward Backtest
 python3 01_scalp_0920_0940/train_walk_forward_scalp.py
 
-# 3. Dry-Run Live 09:20 Scalp Pipeline
+# 3. Dry-Run Live 09:20 Scalp Pipeline (Predicts & Logs to daily ledger)
 bash 01_scalp_0920_0940/run_0920_scalp_pipeline.sh
 
-# 4. Dry-Run Live 09:40 Hybrid Pipeline
+# 4. Evening Reconcile & Audit (Computes actual PnL & sends Telegram report)
+python3 01_scalp_0920_0940/reconcile_0920_scalp_pnl.py
+
+# 5. Dry-Run Live 09:40 Hybrid Pipeline
 bash 02_hybrid_0942_1445/run_0940_hybrid_pipeline.sh
 ```
 
