@@ -5,6 +5,7 @@ train_walk_forward_scalp.py
 Executes Walk-Forward Machine Learning (2021-2026) for the 09:20–09:40 Short Sell Scalp Strategy.
   - Zero Lookahead Bias: Model for year Y is trained exclusively on data from years < Y.
   - Zero Yahoo Finance Leakage: All features sourced 100% from MySQL database ticks.
+  - Hardcoded Universe: Uses the official 180+ NSE F&O universe (no external simulation CSV dependencies).
   - Dynamic Expiry-Matched Lot Sizes: Uses the 35,206-row Master Contract Database.
   - Round-trip Statutory Costs: Flat ₹300 per trade.
 """
@@ -16,7 +17,6 @@ import numpy as np
 import pandas as pd
 import lightgbm as lgb
 import pymysql
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 warnings.filterwarnings('ignore')
 
@@ -28,8 +28,36 @@ DATASET_PATH = os.path.join(SCRIPT_DIR, 'data', 'scalp_0920_ml_dataset.csv.gz')
 OUTPUT_TRADES_CSV = os.path.join(SCRIPT_DIR, 'audited_0920_0940_trades.csv')
 OUTPUT_MODEL_FILE = os.path.join(SCRIPT_DIR, 'lgb_0920_scalp_model.txt')
 
+# Official NSE F&O Universe (180+ Liquid Contract Stocks)
+VALID_STOCKS = [
+    'AARTIIND', 'ABB', 'ABBOTINDIA', 'ABCAPITAL', 'ABFRL', 'ACC', 'ADANIENT', 'ADANIPORTS',
+    'ALKEM', 'AMBUJACEM', 'APOLLOHOSP', 'APOLLOTYRE', 'ASHOKLEY', 'ASIANPAINT', 'ASTRAL',
+    'ATUL', 'AUBANK', 'AUROPHARMA', 'AXISBANK', 'BAJAJ-AUTO', 'BAJAJFINSV', 'BAJFINANCE',
+    'BALKRISIND', 'BALRAMCHIN', 'BANDHANBNK', 'BANKBARODA', 'BATAINDIA', 'BEL', 'BERGEPAINT',
+    'BHARATFORG', 'BHARTIARTL', 'BHEL', 'BIOCON', 'BOSCHLTD', 'BPCL', 'BRITANNIA', 'BSOFT',
+    'CANBK', 'CANFINHOME', 'CHAMBLFERT', 'CHOLAFIN', 'CIPLA', 'COALINDIA', 'COFORGE', 'COLPAL',
+    'CONCOR', 'COROMANDEL', 'CROMPTON', 'CUB', 'CUMMINSIND', 'DABUR', 'DALBHARAT', 'DEEPAKNTR',
+    'DELTACORP', 'DIVISLAB', 'DIXON', 'DLF', 'DRREDDY', 'EICHERMOT', 'ESCORTS', 'EXIDEIND',
+    'FEDERALBNK', 'GAIL', 'GLENMARK', 'GMRINFRA', 'GNFC', 'GODREJCP', 'GODREJPROP', 'GRANULES',
+    'GRASIM', 'GUJGASLTD', 'HAL', 'HAVELLS', 'HCLTECH', 'HDFCAMC', 'HDFCBANK', 'HDFCLIFE',
+    'HEROMOTOCO', 'HINDALCO', 'HINDCOPPER', 'HINDPETRO', 'HINDUNILVR', 'IBULHSGFIN', 'ICICIBANK',
+    'ICICIGI', 'ICICIPRULI', 'IDEA', 'IDFC', 'IDFCFIRSTB', 'IEX', 'IGL', 'INDHOTEL', 'INDIACEM',
+    'INDIAMART', 'INDIGO', 'INDUSINDBK', 'INDUSTOWER', 'INFY', 'IOC', 'IPCALAB', 'IRCTC', 'ITC',
+    'JINDALSTEL', 'JKCEMENT', 'JSWSTEEL', 'JUBLFOOD', 'KOTAKBANK', 'L&TFH', 'LALPATHLAB',
+    'LAURUSLABS', 'LICHSGFIN', 'LT', 'LTF', 'LTIM', 'LTTS', 'LUPIN', 'M&M', 'M&MFIN', 'MANAPPURAM',
+    'MARICO', 'MARUTI', 'MCDOWELL-N', 'MCX', 'METROPOLIS', 'MFSL', 'MGL', 'MOTHERSON', 'MPHASIS',
+    'MRF', 'MUTHOOTFIN', 'NATIONALUM', 'NAUKRI', 'NAVINFLUOR', 'NESTLEIND', 'NMDC', 'NTPC',
+    'OBEROIRLTY', 'OFSS', 'ONGC', 'PAGEIND', 'PEL', 'PERSISTENT', 'PETRONET', 'PFC', 'PIDILITIND',
+    'PIIND', 'PNB', 'POLYCAB', 'POWERGRID', 'PVRINOX', 'RAMCOCEM', 'RBLBANK', 'RECLTD', 'RELIANCE',
+    'SAIL', 'SBICARD', 'SBILIFE', 'SBIN', 'SHREECEM', 'SHRIRAMFIN', 'SIEMENS', 'SRF', 'SUNPHARMA',
+    'SUNTV', 'SYNGENE', 'TATACHEM', 'TATACOMM', 'TATACONSUM', 'TATAMOTORS', 'TATAPOWER', 'TATASTEEL',
+    'TCS', 'TECHM', 'TITAN', 'TORNTPHARM', 'TRENT', 'TVSMOTOR', 'UBL', 'ULTRACEMCO', 'UNITDSPR',
+    'UPL', 'VEDL', 'VOLTAS', 'WIPRO', 'ZEEL', 'ZYDUSLIFE'
+]
+VALID_SET = set(VALID_STOCKS)
+
 print("=" * 95)
-print("🔍 09:20 - 09:40 SCALP ENGINE: WALK-FORWARD MODEL & TRADE REPRODUCER")
+print("🔍 09:20 - 09:40 SCALP ENGINE: HARDCODED F&O UNIVERSE & WALK-FORWARD AUDIT")
 print("=" * 95)
 
 # 1. Load exact historical lot sizes
@@ -55,11 +83,15 @@ def get_exact_lot(stock, dt, fallback=1000):
 print(f"2. Loading Pure Database Features from {os.path.basename(DATASET_PATH)}...")
 df = pd.read_csv(DATASET_PATH)
 df['clean_stock'] = df['clean_stock'].astype(str).str.strip().str.upper()
+
+# Filter strictly to hardcoded universe
+df = df[df['clean_stock'].isin(VALID_SET)].reset_index(drop=True)
+
 df['date_obj'] = pd.to_datetime(df['short_date'])
 df['year'] = df['date_obj'].dt.year
 df['target'] = (df['pnl_net'] > 0).astype(int)
 
-# Map exact dynamic historical lot sizes
+# Map dynamic lot sizes
 df['dynamic_lotsize'] = [get_exact_lot(r['clean_stock'], r['date_obj'], r.get('lotsize', 1000)) for _, r in df.iterrows()]
 
 features = [
@@ -110,9 +142,9 @@ oos_df = pd.concat(all_oos).sort_values(['short_date', 'prob'], ascending=[True,
 top4_ml = oos_df.groupby('short_date').head(4).reset_index(drop=True)
 print(f"   • Filtered to Top 4 daily candidates: {len(top4_ml):,} total trades")
 
-# Check if execution prices exist in existing audited sheet to avoid slow DB queries
+# 4. Merge verified execution prices from existing audited sheet
 if os.path.exists(OUTPUT_TRADES_CSV):
-    print("4. Loading pre-verified MySQL tick execution prices from existing sheet...")
+    print("4. Attaching MySQL tick execution prices...")
     existing_audited = pd.read_csv(OUTPUT_TRADES_CSV)
     price_cols = ['short_date', 'clean_stock', 'p_0920', 'p_0921', 'p_0940', 'p_0941']
     if all(c in existing_audited.columns for c in price_cols):
@@ -138,7 +170,7 @@ print(f"✅ Audited trades saved to: {OUTPUT_TRADES_CSV}")
 
 # Display YoY Performance
 print("\n" + "=" * 95)
-print("📊 WALK-FORWARD AUDIT: 09:21 -> 09:41 (1-MIN EXECUTION BUFFER | ₹300 CHARGES)")
+print("📊 WALK-FORWARD AUDIT: 09:21 -> 09:41 (HARDCODED F&O UNIVERSE | ₹300 CHARGES)")
 print("=" * 95)
 header = f"{'Year':<6} | {'Trades':<7} | {'Win Rate':<10} | {'Gross PnL (₹)':<18} | {'NET PnL (₹300 Charges)':<24}"
 print(header)
