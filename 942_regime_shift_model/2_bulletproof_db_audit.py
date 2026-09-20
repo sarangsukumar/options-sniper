@@ -4,7 +4,7 @@ import time
 import os
 
 TRADES_FILE = '/home/ubuntu/942_regime_shift_model/longer_window_trades_futures_and_eq.csv'
-OUT_FILE = '/home/ubuntu/942_regime_shift_model/final_verified_ledger_2L_Neo.csv'
+OUT_FILE = '/home/ubuntu/942_regime_shift_model/verified_ledger_with_margin.csv'
 
 def get_kotak_neo_charges(qty, sell_price, buy_price):
     turnover = (qty * sell_price) + (qty * buy_price)
@@ -103,17 +103,20 @@ def audit_trade(trade):
     comm = get_kotak_neo_charges(qty, sell_price, buy_price)
     net = gross - comm
     
+    margin_amount = round((qty * sell_price) / 5.0, 2)
+    
     return {
         'date': d,
         'stockname': s,
+        'qty': qty,
+        'margin_amount': margin_amount,
         'sell_time': sell_time,
         'sell_price': sell_price,
         'buy_time': buy_time,
         'buy_price': buy_price,
-        'qty': qty,
-        'gross_pnl': gross,
+        'gross_pnl': round(gross, 2),
         'commission': comm,
-        'net_pnl': net,
+        'net_pnl': round(net, 2),
         'exit_reason': exit_reason
     }
 
