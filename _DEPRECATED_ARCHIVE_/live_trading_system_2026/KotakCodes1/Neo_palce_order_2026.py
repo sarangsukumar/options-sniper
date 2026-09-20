@@ -4,7 +4,7 @@ import database as database # Assuming used elsewhere in your full script
 import random
 import traceback
 import logging
-from datetime import datetime,time
+from datetime import datetime, time, timezone, timedelta
 import pandas as pd # Assuming used elsewhere
 import os # Assuming used elsewhere
 import pickle # Assuming used elsewhere
@@ -534,10 +534,10 @@ for userid in user_ids_to_process:
     try:
         filter_string="and (isvalid IN ('1', '1.5', '2', 'TRUE')) "
         content=""
-        query = f"select o.id id, o.simulationtime simulationtime ,o.stockname stockname,o.type type ,o.limitprice limitprice,o.quantity quantity,o.user user, o.isvalid isvalid,o.ismarket ismarket,o.order_rank order_rank, o.cretime cretime from {order_table} o left join broker_orders b on DATE_FORMAT(o.simulationtime, '%Y-%m-%d')=DATE_FORMAT(b.orderexecutiondate, '%Y-%m-%d') and o.stockname=b.stockname and o.type=b.type and o.user=b.user where (o.isvalid IN ('1', '1.5', '2', 'TRUE')) and DATE_FORMAT(o.simulationtime, '%Y-%m-%d') =DATE('{todaysdate}') and o.is_future='{future_type}' and b.price is null and o.USER='{user_from_API}'"
+        query = f"select o.id id, o.simulationtime simulationtime ,o.stockname stockname,o.type type ,o.limitprice limitprice,o.quantity quantity,o.user user, o.isvalid isvalid,o.ismarket ismarket,o.order_rank order_rank, o.cretime cretime from {order_table} o left join broker_orders b on DATE_FORMAT(o.simulationtime, '%Y-%m-%d')=DATE_FORMAT(b.orderexecutiondate, '%Y-%m-%d') and o.stockname=b.stockname and o.type=b.type and o.user=b.user where (o.isvalid IN ('1', '1.5', '2', 'TRUE', 'CANCEL_REQ')) and DATE_FORMAT(o.simulationtime, '%Y-%m-%d') =DATE('{todaysdate}') and o.is_future IN ('{future_type}', 'TL', 'ZC', 'FUTURES') and b.price is null and o.USER='{user_from_API}'"
         #log_print(query)
         if order_table=='markets.orders_AMO':
-            query = f""" SELECT o.id, o.simulationtime, o.stockname, o.type, o.limitprice, o.quantity, o.user, o.isvalid, o.ismarket, o.order_rank, o.cretime FROM {order_table} o left join broker_orders b on DATE_FORMAT(o.simulationtime, '%Y-%m-%d')=DATE_FORMAT(b.orderexecutiondate, '%Y-%m-%d') and o.stockname=b.stockname and o.type=b.type and o.user=b.user WHERE (o.isvalid IN ('1', '1.5', '2', 'TRUE')) AND DATE_FORMAT(o.simulationtime, '%Y-%m-%d') = DATE('{todaysdate}') AND o.is_future = '{future_type}' and b.price is null AND o.USER = '{user_from_API}' """
+            query = f""" SELECT o.id, o.simulationtime, o.stockname, o.type, o.limitprice, o.quantity, o.user, o.isvalid, o.ismarket, o.order_rank, o.cretime FROM {order_table} o left join broker_orders b on DATE_FORMAT(o.simulationtime, '%Y-%m-%d')=DATE_FORMAT(b.orderexecutiondate, '%Y-%m-%d') and o.stockname=b.stockname and o.type=b.type and o.user=b.user WHERE (o.isvalid IN ('1', '1.5', '2', 'TRUE', 'CANCEL_REQ')) AND DATE_FORMAT(o.simulationtime, '%Y-%m-%d') = DATE('{todaysdate}') AND o.is_future IN ('{future_type}', 'TL', 'ZC', 'FUTURES') and b.price is null AND o.USER = '{user_from_API}' """
 
         df=database.dataframe_from_sql(query )
         
@@ -577,41 +577,41 @@ for userid in user_ids_to_process:
 
     def findscripcode(token):
          try:
-            item_found_conter=0
             dff = pd.read_csv("/home/ubuntu/KotakCodes1/masterfile/kotakneoscripcodemap_historical.csv")
-            for index, row in dff.iloc[::-1].iterrows():
+            for index, row in dff.iterrows():
                 sname = str(row['stockname']).rstrip() if pd.notna(row['stockname']) else ""
                 scripcode = str(row['scripcode']).rstrip() if pd.notna(row['scripcode']) else ""
                 expmonth = str(row['expmonth']).rstrip() if 'expmonth' in row and pd.notna(row['expmonth']) else ""
-                if sname == token:
+                if sname.upper() == token.upper():
                     if expmonth == EXPIRY_MONTH or f"26{EXPIRY_MONTH}" in scripcode or f"26{EXPIRY_MONTH}FUT" in scripcode:
-                        item_found_conter = 1
                         return scripcode
 
-            if item_found_conter == 0:
-                return 0
+            # Fallback: construct standard Kotak Neo futures scripcode
+            return f"{token}26{EXPIRY_MONTH}FUT"
          except Exception as err:
              log_print("exception in findscripcode: " + str(err))
-             return 0
+             return f"{token}26{EXPIRY_MONTH}FUT"
 
     def find_lot_size(token):
          log_print(token)
          try:
-            item_found_conter=0
             dff = pd.read_csv("/home/ubuntu/KotakCodes1/masterfile/kotakneoscripcodemap_historical.csv")
-            for index, row in dff.iloc[::-1].iterrows():
+            for index, row in dff.iterrows():
                 sname = str(row['stockname']).rstrip() if pd.notna(row['stockname']) else ""
                 lot_size = row.get('lotsize', row.get('lot_size', 0))
                 expmonth = str(row['expmonth']).rstrip() if 'expmonth' in row and pd.notna(row['expmonth']) else ""
                 scripcode = str(row['scripcode']).rstrip() if pd.notna(row['scripcode']) else ""
-                if sname == token:
+                if sname.upper() == token.upper():
                     if expmonth == EXPIRY_MONTH or f"26{EXPIRY_MONTH}" in scripcode or f"26{EXPIRY_MONTH}FUT" in scripcode:
                         if pd.notna(lot_size) and int(float(lot_size)) > 0:
-                            item_found_conter = 1
                             return int(float(lot_size))
 
-            if item_found_conter == 0:
-                return 0
+            # Fallback to ICICImaster.csv
+            icici_df = pd.read_csv("/home/ubuntu/KotakCodes1/masterfile/ICICImaster.csv")
+            match = icici_df[icici_df['stockcodes'].str.upper() == token.upper()]
+            if not match.empty and pd.notna(match.iloc[0].get('lotsize')):
+                return int(match.iloc[0]['lotsize'])
+            return 0
          except Exception as err:
             log_print("exception in find_lot_size: "+str(err))
             return 0
@@ -753,7 +753,9 @@ for userid in user_ids_to_process:
                 time_difference_seconds = (datetime.now() - order_datetime).total_seconds() if order_datetime else 0
 
 
-                open_buy_orders[trdSym] = {
+                open_buy_orders[order_id] = {
+                    "stockname": trdSym,
+                    "symbol": trdSym,
                     "order_id": order_id,
                     "order_tag_full": order_tag_full, 
                     "order_time_raw": order_time_raw,
@@ -1172,10 +1174,14 @@ for userid in user_ids_to_process:
 
 
     # --- NEW FUNCTION FOR DYNAMIC TICK SIZE ---
-    def get_tick_size(price):
+    def get_tick_size(price, stockname=None):
         """
-        Returns the correct tick size based on the stock price as per NSE rules.
+        Returns the exact official tick size from the exchange master file.
+        Falls back to approximate brackets if master file fails.
         """
+        if stockname and stockname in tick_size_map:
+            return tick_size_map[stockname]
+            
         if price <= 250:
             return 0.01
         elif 250 < price <= 1000:
@@ -1186,7 +1192,7 @@ for userid in user_ids_to_process:
             return 0.50
         elif 10000 < price <= 20000:
             return 1.00
-        else:  # price > 20000
+        else:
             return 5.00
 
     # NEW FUNCTION: Round price to nearest tick size
@@ -1199,14 +1205,14 @@ for userid in user_ids_to_process:
         return round(price / tick_size) * tick_size
     # --- NEW FUNCTION: Round price down to N ticks ---
     # --- REVISED FUNCTION: round_down_to_n_ticks to fix float precision ---
-    def round_down_to_n_ticks(price, base_price_for_tick_calc, n_ticks_lower):
+    def round_down_to_n_ticks(price, base_price_for_tick_calc, n_ticks_lower, stockname=None):
         """
-        Rounds a given price down by a specific number of ticks (n_ticks_lower),
-        ensuring the final price is still a multiple of the dynamically calculated tick size
-        AND applying final rounding to fix floating-point errors.
+        Bypassed. The orchestrator now provides the mathematically perfect price.
         """
+        return price
+        
         # 1. Determine the tick size
-        tick_size = get_tick_size(base_price_for_tick_calc)
+        tick_size = get_tick_size(base_price_for_tick_calc, stockname)
         
         # 2. Calculate the total deduction
         total_deduction = n_ticks_lower * tick_size
@@ -1366,11 +1372,11 @@ for userid in user_ids_to_process:
         log_print("Found the following open BUY orders (Future Stock) with placement time:")
         # Prepare data for a clean log_print
         report_data = []
-        for symbol, details in all_open_buy_orders.items():
+        for order_id, details in all_open_buy_orders.items():
             time_str = details['order_datetime'].strftime('%Y-%m-%d %H:%M:%S') if details['order_datetime'] else 'N/A'
             report_data.append({
-                "Symbol": symbol,
-                "Order ID": details['order_id'],
+                "Symbol": details.get('symbol', details.get('stockname', 'UNKNOWN')),
+                "Order ID": order_id,
                 "Full Tag": details['order_tag_full'],
                 "Placed Time (Local)": time_str
             })
@@ -1400,16 +1406,16 @@ for userid in user_ids_to_process:
     counter=0
 
 
-    # --- AUTO-CANCEL STALE OPEN BUY ORDERS (> 30s) TO RELEASE FUNDS ---
+    # --- AUTO-CANCEL STALE OPEN BUY ORDERS (> 20s) TO RELEASE FUNDS ---
     if not df.empty and any(df['type'].astype(str).str.upper() == 'BUY') and all_open_buy_orders:
         now_local = datetime.now()
-        for symbol, details in all_open_buy_orders.items():
-            order_id = details['order_id']
+        for order_id, details in all_open_buy_orders.items():
+            symbol = details.get('symbol', details.get('stockname', 'UNKNOWN'))
             order_dt = details.get('order_datetime')
             if order_dt:
                 age_seconds = (now_local - order_dt).total_seconds()
-                if age_seconds > 30:
-                    log_print(f"🧹 AUTO-CANCEL: Open BUY order for {symbol} (ID: {order_id}) is {age_seconds:.1f}s old (> 30s). Cancelling to release funds...")
+                if age_seconds > 20:
+                    log_print(f"🧹 AUTO-CANCEL: Open BUY order for {symbol} (ID: {order_id}) is {age_seconds:.1f}s old (> 20s). Cancelling to release funds...")
                     try:
                         cancel_resp = client.cancel_order(order_id=str(order_id))
                         log_print(f"API Cancel Response for {symbol}: {cancel_resp}")
@@ -1425,6 +1431,33 @@ for userid in user_ids_to_process:
             order_rank=df.loc[i,"order_rank"]
             if order_rank is None:
                 order_rank="LIMIT"
+            isvalid_status = str(df.loc[i,"isvalid"]).strip()
+            
+            # --- INTERCEPT CANCEL_REQ FROM ORCHESTRATOR ---
+            if isvalid_status == 'CANCEL_REQ':
+                order_to_modify_details = open_orders_for_modification.get(stockname)
+                if order_to_modify_details:
+                    order_id_to_cancel = order_to_modify_details["order_id"]
+                    log_print(f"Executing Ghost Order Cancel for {stockname} (ID: {order_id_to_cancel}) due to CANCEL_REQ.")
+                    was_cancelled = cancel_order_by_id(client, order_id_to_cancel, stockname)
+                    if was_cancelled:
+                        log_print(f"Successfully cancelled ghost order for {stockname}.")
+                else:
+                    log_print(f"No open order found at broker to cancel for {stockname} despite CANCEL_REQ.")
+                
+                # Update DB to FALSE so we don't keep polling it
+                try:
+                    import mysql.connector
+                    mydb = mysql.connector.connect(host="localhost", user="root", password="root", database="markets")
+                    mycursor = mydb.cursor()
+                    mycursor.execute(f"UPDATE {order_table} SET isvalid='FALSE' WHERE id={db_id}")
+                    mydb.commit()
+                    mydb.close()
+                except Exception as e:
+                    log_print(f"Error updating CANCEL_REQ to FALSE: {e}")
+                
+                continue # Skip the rest of the placement logic for this row
+
 
             scripcode=findscripcode(stockname)
             lot_size=find_lot_size(stockname)
@@ -1582,47 +1615,7 @@ for userid in user_ids_to_process:
 
             if transaction_type == "BUY":
                 log_print("\n--- BUY Transaction Logic Activated ---")
-                
-                # Define the time window for the BUY adjustment
-                BUY_ADJUSTMENT_START_TIME = time(15, 13, 1) 
-                BUY_ADJUSTMENT_END_TIME = time(15, 26, 30)
-
-                is_within_buy_adjustment_window = (
-                    current_time_only >= BUY_ADJUSTMENT_START_TIME and 
-                    current_time_only <= BUY_ADJUSTMENT_END_TIME
-                )
-
-                if is_within_buy_adjustment_window:
-                    log_print(f"Applying price adjustment logic for BUY as current time ({current_time_only}) is within the BUY window.")
-
-                    if user_from_API == 'MANISHA':
-                        # Logic for MANISHA (n_ticks_lower = 4)
-                        new_limit_price = round_down_to_n_ticks(
-                            price=limitprice, 
-                            base_price_for_tick_calc=limitprice, 
-                            n_ticks_lower= 1
-                        )
-                        log_print(f"[MANISHA-BUY] Adjusted Original: {limitprice} | New Adjusted: {new_limit_price}")
-                        limitprice = new_limit_price
-
-                    elif user_from_API == 'RAJULA':
-                        # Logic for RAJULA (n_ticks_lower = 2 - example)
-                        new_limit_price = round_down_to_n_ticks(
-                            price=limitprice, 
-                            base_price_for_tick_calc=limitprice, 
-                            n_ticks_lower= 2
-                        )
-                        log_print(f"[RAJULA-BUY] Adjusted Original: {limitprice} | New Adjusted: {new_limit_price}")
-                        limitprice = new_limit_price
-
-                    else:
-                        # Default case for all other users within the BUY time window
-                        log_print(f"[DEFAULT-BUY] No specific adjustment for user: {user_from_API}. Price remains: {limitprice}")
-
-                else:
-                    # BUY transaction, but outside the primary adjustment window
-                    log_print(f"BUY adjustment logic skipped. Current time is OUTSIDE the BUY window. Price remains: {limitprice}")
-
+                log_print(f\"BUY adjustment logic bypassed. Using orchestrator provided limit price: {limitprice}\")
 
             # --- SELL TRANSACTION LOGIC (Covers all cases where transaction_type != "BUY") ---
             else: # This block now covers transaction_type == "SELL"
@@ -1852,12 +1845,12 @@ for userid in user_ids_to_process:
     CANCELLATION_THRESHOLD_SECONDS = 20 
     now_local = datetime.now() 
 
-    # --- START OF NEW TIME WINDOW CHECK ---
-    # Define the time window for cancellation (e.g., 9:15 AM to 3:30 PM)
-    CANCELLATION_START_TIME = time(15, 13, 0)
-    CANCELLATION_END_TIME = time(15, 29, 30)
+    # --- START OF NEW TIME WINDOW CHECK (IST AWARE) ---
+    CANCELLATION_START_TIME = time(9, 15, 0)
+    CANCELLATION_END_TIME = time(15, 30, 0)
     
-    current_time_only = datetime.now().time()
+    ist_now = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+    current_time_only = ist_now.time()
     
     is_within_cancellation_window = (
         current_time_only >= CANCELLATION_START_TIME and 
@@ -1865,15 +1858,15 @@ for userid in user_ids_to_process:
     )
 
     if not is_within_cancellation_window:
-        log_print(f"\nINFO: Skipping auto-cancellation. Current time ({current_time_only.strftime('%H:%M:%S')}) is outside the allowed window ({CANCELLATION_START_TIME.strftime('%H:%M:%S')} to {CANCELLATION_END_TIME.strftime('%H:%M:%S')}).")
+        log_print(f"\nINFO: Skipping auto-cancellation. Current IST time ({current_time_only.strftime('%H:%M:%S')}) is outside the allowed window ({CANCELLATION_START_TIME.strftime('%H:%M:%S')} to {CANCELLATION_END_TIME.strftime('%H:%M:%S')}).")
     # --- END OF NEW TIME WINDOW CHECK ---
 
     log_print(f"\n--- START: Auto-Cancellation of Old Open BUY Orders (Threshold: {CANCELLATION_THRESHOLD_SECONDS}s) ---")
     cancellation_summary = []
 
-    for stockname, details in all_open_buy_orders.items():
-        order_id = details['order_id']
-        order_datetime = details['order_datetime'] # This is the datetime object derived from boeSec
+    for order_id, details in all_open_buy_orders.items():
+        stockname = details.get('stockname', details.get('symbol', 'UNKNOWN'))
+        order_datetime = details.get('order_datetime')
         
         if order_datetime is None:
             log_print(f"Warning: Skipping {stockname} (ID: {order_id}) due to missing placement time.")
@@ -1883,9 +1876,9 @@ for userid in user_ids_to_process:
         # Calculate the difference between now and when the order was placed
         time_difference = now_local - order_datetime
         
-        # Check if the order is older than the 60-second threshold AND if we are within the allowed time window
+        # Check if the order is older than threshold AND if we are within the allowed time window
         if is_within_cancellation_window and time_difference.total_seconds() > CANCELLATION_THRESHOLD_SECONDS:
-            log_print(f"ACTION: Order for {stockname} is {time_difference.total_seconds():.2f}s old (>{CANCELLATION_THRESHOLD_SECONDS}s). Attempting cancellation...")
+            log_print(f"ACTION: Order for {stockname} (ID: {order_id}) is {time_difference.total_seconds():.2f}s old (>{CANCELLATION_THRESHOLD_SECONDS}s). Attempting cancellation...")
             
             # Call the cancellation utility function
             was_cancelled = cancel_order_by_id(client, order_id, stockname)
@@ -1895,7 +1888,6 @@ for userid in user_ids_to_process:
             else:
                 cancellation_summary.append(f"{stockname} (ID: {order_id}) - FAILED (Old)")
         else:
-            # Order is within the threshold OR outside the cancellation window
             reason = "Threshold"
             if not is_within_cancellation_window:
                 reason = "Time Window"

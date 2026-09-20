@@ -1,7 +1,7 @@
 """
 STRICT YEARLY WALK-FORWARD AUDIT (PURE EQ)
 ------------------------------------------
-This script proves that the ~60 Lakhs edge is fully authentic and completely immune to future data leakage.
+This script proves that the edge is fully authentic and completely immune to future data leakage.
 It strictly trains on Year(s) N-1 and predicts Year N completely blind.
 
 Crucially, it utilizes the pre-filtered "Top 5" universe logic to avoid the noise of illiquid garbage stocks (which caused Way 2 to fail).
@@ -12,7 +12,6 @@ import lightgbm as lgb
 import os
 
 print("1. Loading Pre-Filtered Top 5 Universe Dataset...")
-# This dataset intrinsically contains the Top 5 morning gap/volume ranked stocks, effectively filtering out illiquid noise.
 df = pd.read_csv('/home/ubuntu/github_repo/shortsellmodel940v3/short_sell_ml_dataset_v3.csv.gz', low_memory=False)
 
 df['date_obj'] = pd.to_datetime(df['short_sell_date'])
@@ -64,8 +63,8 @@ years = sorted(df['year'].unique())
 oos_predictions = []
 
 for test_year in years:
-    if test_year <= 2021: 
-        continue # Need at least 2020-2021 as initial historical training base
+    if test_year <= 2019: # START PREDICTING IN 2020
+        continue 
         
     train_df = df[df['year'] < test_year]
     test_df = df[df['year'] == test_year].copy()
@@ -89,7 +88,6 @@ full_oos = pd.concat(oos_predictions)
 # 4. Filter by Top Conviction (Simulating the 3 to 4 trades per day logic)
 out_trades = []
 for d, group in full_oos.groupby('date_str'):
-    # Select only the top 4 highest probability signals for the day (mimics Way 1 tradeoff)
     selected = group[group['pred_prob'] >= 0.50].sort_values('pred_prob', ascending=False).head(4)
     for _, row in selected.iterrows():
         sp = row['sell_price']

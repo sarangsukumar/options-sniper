@@ -22,7 +22,7 @@ print("="*70)
 # DB config
 DB_CONFIG = {'host': 'localhost', 'user': 'root', 'password': 'root', 'database': 'markets'}
 TABLE_NAME = 'scrapdata'
-CUTOFF_TIME = time(15, 19)  # Use data up to 15:19
+CUTOFF_TIME = time(15, 20)  # Use data up to 15:20
 
 import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

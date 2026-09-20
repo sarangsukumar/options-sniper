@@ -209,8 +209,8 @@ async function processAllStocks(stockList, scripCodes, todayStr) {
             try {
                 const respMin = await withTimeout(breeze.getHistoricalDatav2({
                     interval:     "1minute",
-                    fromDate:     `${todayStr}T03:30:00.000Z`,
-                    toDate:       `${todayStr}T03:51:00.000Z`,
+                    fromDate:     `${todayStr}T09:07:00.000Z`,
+                    toDate:       `${todayStr}T09:20:00.000Z`,
                     stockCode:    scripCode,
                     exchangeCode: "NSE",
                     productType:  "cash",
@@ -271,7 +271,6 @@ async function processAllStocks(stockList, scripCodes, todayStr) {
                 allDbRows.push([
                     stockName,
                     dp.close,
-                    dp.open,
                     dp.open,
                     dp.high,
                     dp.low,

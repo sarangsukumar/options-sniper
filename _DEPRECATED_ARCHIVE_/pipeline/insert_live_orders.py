@@ -108,10 +108,18 @@ def main():
         print("ℹ️ No predictions found (file empty).")
         return
         
+    from datetime import timedelta
+    today_ist = (datetime.utcnow() + timedelta(hours=5, minutes=30)).date()
+    today_ist_str = today_ist.strftime('%Y%m%d')
+
     # The last row should be today's predictions
     # We find the latest date in the file
     latest_date_val = max([r[0] for r in rows if r])
     
+    if latest_date_val != today_ist_str:
+        print(f"ℹ️ Latest predictions in file are from {latest_date_val}, not today ({today_ist_str}). No orders generated today (0 candidates qualified).")
+        return
+
     for r in rows:
         if r and r[0] == latest_date_val:
             stock = r[1]
@@ -164,7 +172,7 @@ def main():
     for idx, rec in enumerate(execution_records, start=1):
         stockname = rec['stock']
         qty = rec['qty']
-        rank_label = 'TL_1' if idx == 1 else 'TL_3'
+        rank_label = 'TL_3_sarang' if idx == 1 else 'TL_4_sarang'
 
         cursor.execute(insert_query, (
             stockname, 0.0, qty, 'BUY', 'FALSE', 0.0,

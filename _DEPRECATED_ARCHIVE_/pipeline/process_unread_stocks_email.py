@@ -98,43 +98,17 @@ def process_and_insert_orders(recommended_stocks):
     
     print("[Info] Connecting to Database...")
     try:
+        import pymysql
         conn = pymysql.connect(host=DB_HOST, user=DB_USER, password=DB_PASSWORD, database=DB_NAME)
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
-        # 1. Get current orders for today
-        query = f"SELECT stockname, quantity FROM orders WHERE simulationtime = '{today_str}'"
-        cursor.execute(query)
-        existing_orders = cursor.fetchall()
-        
-        total_qty_today = sum(order['quantity'] for order in existing_orders)
-        
-        if total_qty_today >= 3:
-            print("[Info] Total quantity for today is already 3 or more. Skipping insertion.")
-            return
-            
-        remaining_capacity = 3 - total_qty_today
-        print(f"[Info] Current DB Quantity: {total_qty_today}. We can insert {remaining_capacity} more orders.")
-        
-        # 2. Map existing stocks to their quantities
-        stock_qty_map = {}
-        for order in existing_orders:
-            stock = order['stockname']
-            stock_qty_map[stock] = stock_qty_map.get(stock, 0) + order['quantity']
-            
-        # 3. Insert new stocks
-        current_rank_num = total_qty_today + 1 
+        # 3. Insert new stocks (Always prioritize as TL_1_amrit, TL_2_amrit)
+        current_rank_num = 1
         inserted_count = 0
         
-        for stock in recommended_stocks:
-            if remaining_capacity <= 0:
-                break
-                
-            current_stock_qty = stock_qty_map.get(stock, 0)
-            
-            if current_stock_qty >= 2:
-                print(f"[Skip] Stock {stock} already has quantity {current_stock_qty}. Max 2 allowed per stock. Skipping.")
-                continue
-                
+        top_stocks = recommended_stocks[:2]
+        
+        for stock in top_stocks:
             rank_str = f"TL_{current_rank_num}_amrit"
             insert_sql = """
                 INSERT INTO orders 
@@ -147,8 +121,6 @@ def process_and_insert_orders(recommended_stocks):
             
             print(f"[Success] Inserted: {stock} with rank {rank_str}")
             
-            stock_qty_map[stock] = current_stock_qty + 1
-            remaining_capacity -= 1
             current_rank_num += 1
             inserted_count += 1
             

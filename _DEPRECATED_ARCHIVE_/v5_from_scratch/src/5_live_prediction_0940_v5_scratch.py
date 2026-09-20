@@ -37,8 +37,8 @@ import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
-BASE_DIR = '/home/ubuntu/shortsellmodel940v5'
-MODEL_PATH = os.path.join(BASE_DIR, 'models', 'model_v5_lgb.txt')
+BASE_DIR = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/v5_from_scratch'
+MODEL_PATH = os.path.join(BASE_DIR, 'models', 'model_v5_lgb_scratch.txt')
 PNL_PATH = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/data/markets_pnl0325.csv'
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '5350311365:AAFkTUBR4IGvgS5Z9mJngz-mgk7-HkhFEYE')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '-698073972')

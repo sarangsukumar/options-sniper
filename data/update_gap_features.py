@@ -199,9 +199,17 @@ def compute_gap_features_from_yahoo(df):
                 prev_day_volume = None
                 if idx > 0:
                     prev_day_volume = float(stock_df.iloc[idx - 1]['Volume'])
+                    
+                day_before_volume = None
+                if idx > 1:
+                    day_before_volume = float(stock_df.iloc[idx - 2]['Volume'])
                 
                 volume_change_pct = None
-                if prev_day_volume is not None and prev_day_volume != 0:
+                if day_before_volume is not None and day_before_volume != 0 and prev_day_volume is not None:
+                    # Match JS pipeline: primary logic is Yesterday vs Day Before
+                    volume_change_pct = ((prev_day_volume - day_before_volume) / day_before_volume) * 100
+                elif prev_day_volume is not None and prev_day_volume != 0:
+                    # Fallback
                     volume_change_pct = ((today_volume - prev_day_volume) / prev_day_volume) * 100
             except (ValueError, TypeError):
                 continue

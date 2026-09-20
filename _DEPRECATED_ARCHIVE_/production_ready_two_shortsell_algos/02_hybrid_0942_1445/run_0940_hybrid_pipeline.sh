@@ -34,16 +34,24 @@ conn.close()
 echo "• Today Date        : $TODAY_DATE" >> "$LOG_FILE"
 echo "• Prev Trading Date : $PREV_TRADING_DATE" >> "$LOG_FILE"
 
-# Step 1: Download latest F1 ticks up to 09:40 into scrapdata_F1
-# (Cleans partial morning ticks from 09:35 simulation to prevent duplicates)
-echo "[Step 1/2] Fetching F1 ticks up to 09:40 AM into scrapdata_F1..." >> "$LOG_FILE"
+# Step 1A: Download latest F1 ticks up to 09:40 into scrapdata_F1
+echo "[Step 1A/2] Fetching F1 ticks up to 09:40 AM into scrapdata_F1..." >> "$LOG_FILE"
 cd /home/ubuntu/daily_prediction_sytem_Dynamic_threshold
 rm -f pipeline/checkpoint_F1*.json
-# Only pass TODAY_DATE so it deletes partial 09:35 ticks for TODAY only, leaving yesterday intact!
 if node pipeline/8.icicidatawithsession_F1.js "$TODAY_DATE" "$TODAY_DATE" >> "$LOG_FILE" 2>&1; then
-    echo "✔ Step 1 (F1 Ticks Downloader) completed successfully." >> "$LOG_FILE"
+    echo "✔ Step 1A (F1 Ticks Downloader) completed successfully." >> "$LOG_FILE"
 else
-    echo "⚠️ Warning: Step 1 encountered an issue — continuing with existing DB ticks." >> "$LOG_FILE"
+    echo "⚠️ Warning: Step 1A encountered an issue — continuing with existing F1 DB ticks." >> "$LOG_FILE"
+fi
+
+# Step 1B: Download latest Cash (EQ) ticks up to 09:40 into scrapdata
+echo "[Step 1B/2] Fetching Cash (EQ) ticks up to 09:40 AM into scrapdata (for Rule 1 simulation consistency)..." >> "$LOG_FILE"
+rm -f /home/ubuntu/live_trading_setup_2026/checkpoint*.json
+# Run the EQ downloader sequentially to avoid ICICI session/rate limit conflicts
+if node /home/ubuntu/live_trading_setup_2026/3.icicidatawithsession_EQ.js "$TODAY_DATE" "$TODAY_DATE" "EQ" >> "$LOG_FILE" 2>&1; then
+    echo "✔ Step 1B (EQ Ticks Downloader) completed successfully." >> "$LOG_FILE"
+else
+    echo "⚠️ Warning: Step 1B encountered an issue — Cash Rule 1 filter might skip stocks." >> "$LOG_FILE"
 fi
 
 # Step 2: Run 09:40 Hybrid ML Pipeline & Dispatch Telegram Alert

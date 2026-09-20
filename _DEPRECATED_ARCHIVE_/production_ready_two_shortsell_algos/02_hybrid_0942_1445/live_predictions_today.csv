@@ -1,3 +1,4 @@
-clean_stock,lots_to_trade,signal_type,confidence,entry_price_0940,rank_v6,rank_v7,source,is_dual,is_quad,lotsize,total_quantity,stop_loss_3pct
-MCX,2,DUAL CONFIRMED 🎯,VERY HIGH (75.5% WR | 6.31 PF),3283.7,1,2,CL FILL,True,False,225,450,3382.21
-UPL,2,DUAL CONFIRMED 🎯,VERY HIGH (75.5% WR | 6.31 PF),571.0,2,1,CL FILL,True,False,1355,2710,588.13
+clean_stock,lots_to_trade,signal_type,confidence,entry_price_0940,gain_pct_0941,rank_v6,rank_v7,source,is_dual,is_quad,lotsize,total_quantity,stop_loss_3pct
+ICICIGI,2,DUAL CONFIRMED 🎯,VERY HIGH (75.5% WR | 6.31 PF),1474.0,-0.91,2,3,CL FILL,True,False,325,650,1525.59
+SHREECEM,1,SINGLE ENGINE (CL) 📊,HIGH (56.0% WR | 2.3 PF),22135.0,0.84,1,15,CL FILL,False,False,25,25,22909.72
+SBIN,1,SINGLE ENGINE (CL) 📊,HIGH (56.0% WR | 2.3 PF),987.8,-0.13,3,42,CL FILL,False,False,750,750,1022.37
