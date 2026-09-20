@@ -1,30 +1,25 @@
-"""
-STRICT YEARLY WALK-FORWARD AUDIT (PURE EQ)
-------------------------------------------
-This script proves that the edge is fully authentic and completely immune to future data leakage.
-It strictly trains on Year(s) N-1 and predicts Year N completely blind.
-
-Crucially, it utilizes the pre-filtered "Top 5" universe logic to avoid the noise of illiquid garbage stocks (which caused Way 2 to fail).
-"""
-
 import pandas as pd
 import lightgbm as lgb
 import os
+import numpy as np
 
-print("1. Loading Pre-Filtered Top 5 Universe Dataset...")
+print("1. Loading Pre-Filtered Top 5 Universe Dataset (2015-2026)...")
 df = pd.read_csv('/home/ubuntu/github_repo/shortsellmodel940v3/short_sell_ml_dataset_v3.csv.gz', low_memory=False)
 
 df['date_obj'] = pd.to_datetime(df['short_sell_date'])
 df['date_str'] = df['date_obj'].dt.strftime('%Y-%m-%d')
 df['year'] = df['date_obj'].dt.year
 
-print("2. Securing Pure EQ Physical Returns (Zero Custom Limit Bias)...")
+print("2. Merging Pure EQ Physical Returns for 2020-2026 Evaluation...")
 df_eq = pd.read_csv('/home/ubuntu/942_regime_shift_model/verified_ledger_with_margin.csv')
 df_eq['pure_eq_return'] = (df_eq['sell_price'] - df_eq['buy_price']) / df_eq['sell_price'] * 100.0
 
 df = df.merge(df_eq[['date', 'stockname', 'pure_eq_return', 'sell_price', 'buy_price']], left_on=['date_str', 'clean_stock'], right_on=['date', 'stockname'], how='left')
-df = df.dropna(subset=['pure_eq_return'])
-df['target'] = (df['pure_eq_return'] > 0).astype(int)
+
+# The Pure EQ ledger only has 2020-2026. For the historical training base (2015-2019), we fall back to the original target return to build the ML brain.
+df['final_target_return'] = np.where(df['pure_eq_return'].notna(), df['pure_eq_return'], df['short_pct_return'])
+df = df.dropna(subset=['final_target_return'])
+df['target'] = (df['final_target_return'] > 0).astype(int)
 
 # Global Features
 global_df = pd.read_csv('/home/ubuntu/942_regime_shift_model/global_macro_features.csv')
@@ -58,20 +53,23 @@ def get_kotak_neo_charges(qty, sell_price, buy_price):
     gst = (brokerage + txn + sebi) * 0.18
     return round(brokerage + stt + txn + sebi + stamp + gst, 2)
 
-print("\n3. Executing Strict Yearly Walk-Forward Training & OOS Prediction...")
+print("\n3. Executing Strict Yearly Walk-Forward Training & OOS Prediction (Starting from 2020)...")
 years = sorted(df['year'].unique())
 oos_predictions = []
 
 for test_year in years:
-    if test_year <= 2019: # START PREDICTING IN 2020
+    if test_year < 2020: # Start prediction from 2020 exactly!
         continue 
         
     train_df = df[df['year'] < test_year]
     test_df = df[df['year'] == test_year].copy()
     
+    # Only predict on rows that actually exist in the verified 2020-2026 ledger
+    test_df = test_df[test_df['pure_eq_return'].notna()]
+    
     if len(train_df) == 0 or len(test_df) == 0: continue
     
-    print(f"   -> Training on data up to {test_year-1} | Predicting {test_year} strictly Out-Of-Sample...")
+    print(f"   -> Training on {len(train_df)} historical trades up to {test_year-1} | Predicting {test_year} strictly Out-Of-Sample...")
     train_data = lgb.Dataset(train_df[features], label=train_df['target'])
     params = {
         'objective': 'binary', 'metric': 'auc', 'boosting_type': 'gbdt',
@@ -85,14 +83,14 @@ for test_year in years:
 
 full_oos = pd.concat(oos_predictions)
 
-# 4. Filter by Top Conviction (Simulating the 3 to 4 trades per day logic)
+# 4. Filter by Top Conviction
 out_trades = []
 for d, group in full_oos.groupby('date_str'):
     selected = group[group['pred_prob'] >= 0.50].sort_values('pred_prob', ascending=False).head(4)
     for _, row in selected.iterrows():
         sp = row['sell_price']
         bp = row['buy_price']
-        qty = int(1000000.0 / sp) # 10L Leveraged Exposure
+        qty = int(1000000.0 / sp)
         gross = (sp - bp) * qty
         net = gross - get_kotak_neo_charges(qty, sp, bp)
         
