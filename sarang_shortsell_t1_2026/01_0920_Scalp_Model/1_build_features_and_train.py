@@ -73,7 +73,7 @@ params_920 = {
 
 print("3. Training Walk-Forward Expanding Window Model...")
 all_oos_920 = []
-for y in range(2021, 2027):
+for y in range(2020, 2027):
     tr = df_920[df_920['year'] < y]
     te = df_920[df_920['year'] == y].copy()
     if len(tr) == 0 or len(te) == 0: continue

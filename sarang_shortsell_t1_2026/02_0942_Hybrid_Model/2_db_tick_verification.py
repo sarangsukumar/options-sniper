@@ -83,7 +83,7 @@ preds = pd.read_csv(os.path.join(BASE_DIR, '0942_predictions.csv'))
 
 print(f"2. Auditing {len(preds)} Trades against MySQL Ticks (Max 3-Min Liquidity Windows)...")
 results = []
-with ThreadPoolExecutor(max_workers=30) as ex:
+with ThreadPoolExecutor(max_workers=5) as ex:
     for res in ex.map(audit_trade, [row for _, row in preds.iterrows()]):
         if res: results.append(res)
 

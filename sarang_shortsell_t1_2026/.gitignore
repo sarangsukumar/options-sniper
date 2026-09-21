@@ -1,0 +1,3 @@
+# Skip large raw dataset files (can be regenerated)
+02_0942_Hybrid_Model/data/short_sell_ml_dataset_v5_scratch.csv
+01_0920_Scalp_Model/data/scalp_0920_ml_dataset.csv.gz
