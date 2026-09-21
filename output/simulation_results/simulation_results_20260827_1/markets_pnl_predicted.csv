@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-08-26,DIXON,14294.0,14309.0,50,200.0,550.0,Custom Limit Fill,Day 1,
+2026-08-26,MANAPPURAM,371.05,371.2,3000,200.0,249.9999999999318,Custom Limit Fill,Day 1,
+2026-08-26,NATIONALUM,403.9,400.75,1875,200.0,-6106.249999999957,Fallback/Standard Limit Fill,Day 1,
+2026-08-26,VEDL,289.85,289.9,1150,200.0,-142.5000000000523,Custom Limit Fill,Day 1,

@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-09-02,ABCAPITAL,396.25,400.35,3100,200.0,12510.000000000071,Custom Limit Fill,Day 1,
+2026-09-02,INDHOTEL,730.5,731.4,1000,200.0,699.9999999999773,Custom Limit Fill,Day 1,
+2026-09-02,MUTHOOTFIN,2942.5,2974.0,275,200.0,8462.5,Custom Limit Fill,Day 1,
+2026-09-02,SHRIRAMFIN,1055.4,1061.0,825,200.0,4419.999999999925,Custom Limit Fill,Day 1,

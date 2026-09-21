@@ -1,0 +1,2 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-08-31,JUBLFOOD,484.55,487.25,1250,200.0,3174.999999999986,Custom Limit Fill,Day 1,

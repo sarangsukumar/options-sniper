@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-09-16,CHOLAFIN,1777.1,1777.4,625,200.0,-12.499999999886313,Fallback/Standard Limit Fill,Day 1,
+2026-09-16,COFORGE,1768.4,1769.8,475,200.0,464.9999999999352,Custom Limit Fill,Day 1,
+2026-09-16,GODREJPROP,1675.8,1676.0,325,200.0,-134.99999999998522,Custom Limit Fill,Day 1,
+2026-09-16,OBEROIRLTY,1705.8,1709.9,350,200.0,1235.0000000000477,Custom Limit Fill,Day 1,

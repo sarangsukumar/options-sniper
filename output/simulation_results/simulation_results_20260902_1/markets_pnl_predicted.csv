@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-09-01,DLF,675.1,661.3,950,200.0,-13310.000000000065,Fallback/Standard Limit Fill,Day 1,
+2026-09-01,INDIGO,5040.0,4949.5,150,200.0,-13775.0,Final Market Fill (at 0939),Day 1,
+2026-09-01,IOC,136.54,135.34,4875,200.0,-6049.9999999999445,Fallback/Standard Limit Fill,Day 1,
+2026-09-01,LTF,308.15,302.95,2250,200.0,-11899.999999999975,Final Market Fill (at 0939),Day 1,

@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-08-24,ABB,7516.0,7485.0,125,200.0,-4075.0,Fallback/Standard Limit Fill,Day 1,
+2026-08-24,BHEL,410.3,410.85,2625,200.0,1243.7500000000298,Custom Limit Fill,Day 1,
+2026-08-24,CUMMINSIND,5172.5,5184.0,200,200.0,2100.0,Custom Limit Fill,Day 1,
+2026-08-24,SIEMENS,4094.4,4094.9,175,200.0,-112.5,Custom Limit Fill,Day 1,

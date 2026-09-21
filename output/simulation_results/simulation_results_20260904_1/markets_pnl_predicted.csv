@@ -1,0 +1,5 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-09-03,COFORGE,1967.6,1982.1,475,200.0,6687.5,Custom Limit Fill,Day 1,
+2026-09-03,GODREJCP,874.6,876.45,500,200.0,725.0000000000114,Custom Limit Fill,Day 1,
+2026-09-03,NAUKRI,1341.0,1349.0,550,200.0,4200.0,Custom Limit Fill,Day 1,
+2026-09-03,PERSISTENT,5640.0,5685.5,125,200.0,5487.5,Custom Limit Fill,Day 1,

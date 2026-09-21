@@ -1,0 +1,4 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-09-10,COFORGE,1845.0,1848.5,475,200.0,1462.5,Custom Limit Fill,Day 1,
+2026-09-10,HDFCAMC,2428.8,2387.9,300,200.0,-12470.000000000027,Fallback/Standard Limit Fill,Day 1,
+2026-09-10,TECHM,1527.6,1540.0,600,200.0,7240.000000000055,Custom Limit Fill,Day 1,
