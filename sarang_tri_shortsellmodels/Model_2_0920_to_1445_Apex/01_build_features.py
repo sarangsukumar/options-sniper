@@ -1,4 +1,4 @@
-import pymysql, pd, numpy as np, os, time
+import pymysql, pandas as pd, numpy as np, os, time
 csv_path = 'model2_features.csv'
 processed = set(pd.read_csv(csv_path)['date'].unique()) if os.path.exists(csv_path) else set()
 dates = pd.to_datetime(pd.read_csv('/home/ubuntu/github_repo/shortsellmodel940v3/short_sell_ml_dataset_v3.csv.gz')['short_sell_date']).dt.strftime('%Y-%m-%d').unique()
