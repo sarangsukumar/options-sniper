@@ -333,6 +333,9 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         rejection_wick = (high_0919 - close_0919) / (high_0919 - low_0919 + 1e-9)
         pos_arc_ratio = calc_arc_features(p_0915_ticks)
 
+if close_0919 < 50:
+            continue
+        
         lotsize = int(500000.0 / close_0919)
 
         processed_records.append({

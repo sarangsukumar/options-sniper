@@ -246,8 +246,13 @@ def load_historical_dataset_with_macro(dataset_path):
     features['nifty_vs_sp500_gap'] = features['nifty_gap'] - features['sp500_overnight_ret']
     features['nifty_vs_nikkei_gap'] = features['nifty_gap'] - features['nikkei_gap']
     global_macro = features[['date_str', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap']]
-    df_hist = pd.read_csv(dataset_path, low_memory=False)
+df_hist = pd.read_csv(dataset_path, low_memory=False)
     date_col = 'short_date' if 'short_date' in df_hist.columns else 'buy_day'
+    df_hist = df_hist.drop_duplicates(subset=[date_col, 'clean_stock'])
+    if 'short_pct_return' in df_hist.columns:
+        df_hist['short_pct_return'] = df_hist['short_pct_return'].clip(-15, 15)
+    if 'short_entry_price' in df_hist.columns:
+        df_hist = df_hist[df_hist['short_entry_price'] >= 50].reset_index(drop=True)
     df_hist = df_hist.merge(global_macro, left_on=date_col, right_on='date_str', how='left')
     return df_hist
 
@@ -370,9 +375,10 @@ def main():
         print("❌ Error: No morning ticks found for today.")
         return
 
-    print("3. Computing Features for active universe...")
+print("3. Computing Features for active universe...")
     df_features = compute_features(df_prev, df_0907, df_morn, target_date_str, set(), macro)
-    print(f"   • Total candidate stocks scored: {len(df_features)}")
+    df_features = df_features[df_features['entry_price_0940'] >= 50].reset_index(drop=True)
+    print(f"   • Total candidate stocks scored (Price >= ₹50): {len(df_features)}")
 
     df_plan = train_and_predict_single(df_features)
 
