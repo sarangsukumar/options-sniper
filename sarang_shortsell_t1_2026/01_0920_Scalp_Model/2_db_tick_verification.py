@@ -21,7 +21,7 @@ def audit_trade(row):
     conn = pymysql.connect(host='localhost', user='root', password='root', database='markets', cursorclass=pymysql.cursors.DictCursor)
     with conn.cursor() as cur:
         # Pull ticks from 09:22 to 09:45 (giving 5 mins buffer for the 09:40 exit)
-        cur.execute(f"SELECT time, price, high FROM scrapdata WHERE date='{d}' AND stockname LIKE '%{s}%' AND time>='{d} 09:22:00' AND time<='{d} 09:45:00' ORDER BY time ASC")
+        cur.execute(f"SELECT time, price, high FROM scrapdata WHERE date='{d}' AND stockname = '{s}' AND time>='{d} 09:22:00' AND time<='{d} 09:45:00' ORDER BY time ASC")
         ticks = cur.fetchall()
     conn.close()
     
