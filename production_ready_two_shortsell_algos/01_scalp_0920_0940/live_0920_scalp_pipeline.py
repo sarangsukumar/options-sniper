@@ -9,7 +9,7 @@ Triggered at 09:20:20 AM IST Mon-Fri:
 1. Reads morning EQ cash ticks (09:15 - 09:19) and previous day features from scrapdata.
 2. Performs instant inference using pre-trained LightGBM walk-forward model.
 3. Ranks candidates and selects Top 4 weakest stocks for opening scalp short-sell.
-4. Matches dynamic contract lot sizes from historical_lotsize_new.csv.
+4. Fixed ₹5,00,000 notional equity per trade: qty = int(500000 / cmp_0919).
 5. Formulates 09:21:00 Entry -> 09:41:00 Exit order plan and alerts Telegram bot.
 =============================================================================
 """
@@ -31,7 +31,6 @@ warnings.filterwarnings('ignore')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROD_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
 MODEL_FILE = os.path.join(SCRIPT_DIR, 'lgb_0920_scalp_model.txt')
-LOTS_FILE = os.path.join(PROD_ROOT, 'config', 'historical_lotsize_new.csv')
 BOT_SCRIPT = '/home/ubuntu/KotakCodes1/status_Info_bot.js'
 OUTPUT_CSV = os.path.join(SCRIPT_DIR, 'live_0920_predictions_today.csv')
 LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0920_live_ledger.csv')
@@ -78,26 +77,6 @@ def get_db_connection():
         cursorclass=pymysql.cursors.DictCursor
     )
 
-def load_lot_sizes():
-    if not os.path.exists(LOTS_FILE):
-        return {}
-    df = pd.read_csv(LOTS_FILE)
-    df['clean_stock'] = df['stockname'].astype(str).str.strip().str.upper()
-    df['exp_dt'] = pd.to_datetime(df['expdate'], format='%d/%m/%Y', errors='coerce')
-    lot_map = {}
-    for stock, grp in df.groupby('clean_stock'):
-        lot_map[stock] = grp.sort_values('exp_dt')
-    return lot_map
-
-def get_exact_lot(stock, dt, lot_map, fallback=1000):
-    stk = str(stock).strip().upper()
-    if stk not in lot_map:
-        return fallback
-    sub = lot_map[stk]
-    f = sub[sub['exp_dt'] >= dt]
-    if len(f) > 0:
-        return int(f.iloc[0]['lotsize'])
-    return int(sub.iloc[-1]['lotsize'])
 
 def send_telegram_alert(msg):
     if os.path.exists(BOT_SCRIPT):
@@ -133,7 +112,7 @@ def append_to_daily_ledger(target_date_str, top4_df):
             'stockname': str(row['stockname']).strip().upper(),
             'short_prob': round(float(row['short_prob']), 4),
             'close_0919': round(float(row['close_0919']), 2),
-            'lotsize': int(row['lotsize']),
+            'qty': int(row['lotsize']),
             'entry_time': '09:21:00',
             'entry_price': np.nan,
             'exit_time': '09:41:00',
@@ -201,7 +180,6 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         print(f"❌ Error: Model file not found at {MODEL_FILE}")
         return
     model = lgb.Booster(model_file=MODEL_FILE)
-    lot_map = load_lot_sizes()
 
     # Fetch today's global macro features via yfinance (matches training logic exactly)
     print(f"\n0. Fetching Global Macro Features (Nifty/S&P500/Nikkei) via yfinance...")
