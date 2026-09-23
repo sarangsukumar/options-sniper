@@ -37,10 +37,8 @@ OUTPUT_CSV = os.path.join(SCRIPT_DIR, 'live_0920_predictions_today.csv')
 LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0920_live_ledger.csv')
 
 FEATURES = [
-    'morn_range_pct', 'prev_intraday_vwap_gap', 'prev_intraday_roc_last_hour',
-    'prev_intraday_return', 'positive_arc_ratio', 'Gap_Pct', 'gap_0907_pct',
-    'rejection_wick', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap',
-    'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap'
+    'prev_intraday_vwap_gap', 'prev_intraday_roc_last_hour', 'prev_intraday_return',
+    'positive_arc_ratio', 'Gap_Pct', 'gap_0907_pct', 'morn_range_pct', 'rejection_wick'
 ]
 
 # Official NSE F&O Universe (180+ Liquid Contract Stocks)
@@ -333,7 +331,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         rejection_wick = (high_0919 - close_0919) / (high_0919 - low_0919 + 1e-9)
         pos_arc_ratio = calc_arc_features(p_0915_ticks)
 
-if close_0919 < 50:
+        if close_0919 < 50:
             continue
         
         lotsize = int(500000.0 / close_0919)
