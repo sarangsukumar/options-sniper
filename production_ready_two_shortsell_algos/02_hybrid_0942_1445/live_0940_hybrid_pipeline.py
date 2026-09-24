@@ -25,6 +25,13 @@ import subprocess
 import lightgbm as lgb
 import warnings
 
+# Insert short-sell orders into DB for automated Kotak MIS placement
+sys.path.insert(0, '/home/ubuntu/KotakCodes1')
+try:
+    from insert_shortsell_orders import insert_shortsell_orders as _insert_ss_orders
+except ImportError:
+    _insert_ss_orders = None
+
 warnings.filterwarnings('ignore')
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -257,37 +264,142 @@ def load_historical_dataset_with_macro(dataset_path):
     return df_hist
 
 def train_and_predict_single(df_today):
-    print("\n2. Training LightGBM Model on Historical Database...")
-    df_hist = load_historical_dataset_with_macro(HIST_DATASET)
-    for f in PURE_DB_FEATURES:
-        df_hist[f] = pd.to_numeric(df_hist[f], errors='coerce').fillna(0.0)
+    model_file = os.path.join(SCRIPT_DIR, 'lgb_0940_hybrid_model.txt')
 
-    params_942 = {
-        'objective': 'regression',
-        'metric': 'rmse',
-        'boosting_type': 'gbdt',
-        'learning_rate': 0.05,
-        'max_depth': 5,
-        'num_leaves': 31,
-        'verbose': -1,
-        'random_state': 42
-    }
-
-    print("   • Training model...")
-    mod = lgb.train(
-        params_942,
-        lgb.Dataset(df_hist[PURE_DB_FEATURES], label=df_hist['short_pct_return']),
-        num_boost_round=100
-    )
+    if os.path.exists(model_file):
+        print("\n2. Loading Pre-Trained Certified LightGBM Model...")
+        mod = lgb.Booster(model_file=model_file)
+        print(f"   ✔ Model loaded: {model_file} ({len(mod.feature_name())} features)")
+    else:
+        # Fallback: retrain from scratch (slow — run train_and_simulate_hybrid.py to pre-save model)
+        print("\n2. ⚠️  Model file not found — Training LightGBM from Historical Database (slow)...")
+        df_hist = load_historical_dataset_with_macro(HIST_DATASET)
+        for f in PURE_DB_FEATURES:
+            df_hist[f] = pd.to_numeric(df_hist[f], errors='coerce').fillna(0.0)
+        params_942 = {
+            'objective': 'regression', 'metric': 'rmse', 'boosting_type': 'gbdt',
+            'learning_rate': 0.05, 'max_depth': 5, 'num_leaves': 31,
+            'verbose': -1, 'random_state': 42
+        }
+        print("   • Training model...")
+        mod = lgb.train(
+            params_942,
+            lgb.Dataset(df_hist[PURE_DB_FEATURES], label=df_hist['short_pct_return']),
+            num_boost_round=100
+        )
+        mod.save_model(model_file)
+        print(f"   ✔ Model trained and saved to {model_file}")
 
     print("   • Scoring today's candidates...")
     df_today['pred_return'] = mod.predict(df_today[PURE_DB_FEATURES])
     df_ranked = df_today.sort_values('pred_return', ascending=False).reset_index(drop=True)
-    
-    top4 = df_ranked.head(4).copy()
-    top4['signal_type'] = 'TOP 4'
-    top4['lots_to_trade'] = 1
-    return top4
+
+    # =========================================================
+    # APPROVED FILTER RULES (Zero Look-Ahead, Proven on 7 Years)
+    # =========================================================
+    import datetime as dt_module
+    today_str = df_ranked['date_str'].iloc[0] if 'date_str' in df_ranked.columns else dt_module.date.today().strftime('%Y-%m-%d')
+    today_dow = pd.Timestamp(today_str).dayofweek  # 0=Mon
+
+    # Fetch Nifty's live 09:40 price and prev close from DB
+    try:
+        import pymysql
+        _conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
+        _cur = _conn.cursor()
+        _cur.execute(f"""
+            SELECT
+              (SELECT price FROM scrapdata_F1 WHERE stockname='NIFTY 50' AND DATE(time) < '{today_str}' ORDER BY time DESC LIMIT 1) AS nifty_prev_close,
+              (SELECT price FROM scrapdata_F1 WHERE stockname='NIFTY 50' AND DATE(time) = '{today_str}' AND TIME(time) >= '09:40:00' ORDER BY time ASC LIMIT 1) AS nifty_940_price
+        """)
+        _row = _cur.fetchone()
+        _conn.close()
+        nifty_prev_close = float(_row[0]) if _row and _row[0] else 0.0
+        nifty_940_price  = float(_row[1]) if _row and _row[1] else 0.0
+        nifty_pct = ((nifty_940_price - nifty_prev_close) / nifty_prev_close * 100.0) if nifty_prev_close > 0 else 0.0
+        print(f"\n   📊 FILTER INPUTS:")
+        print(f"      Nifty Prev Close : {nifty_prev_close:.2f}")
+        print(f"      Nifty @ 09:40    : {nifty_940_price:.2f}")
+        print(f"      Nifty % Change   : {nifty_pct:+.2f}%")
+        print(f"      Day of Week      : {'Monday' if today_dow==0 else ['Tue','Wed','Thu','Fri'][today_dow-1]}")
+    except Exception as e:
+        print(f"   ⚠️ Could not fetch Nifty live data: {e}. Filters defaulting to Rule 1 only.")
+        nifty_pct = 0.0
+
+    # Compute stock % change from prev_close to 09:40
+    # prev_close is stored in prev_metrics; entry_price_0940 is the 09:40 price
+    if 'entry_price_0940' in df_ranked.columns and 'Gap_Pct' in df_ranked.columns:
+        # Gap_Pct = (open - prev_close) / prev_close * 100, but we need 09:40 price
+        # Use gap_0907_pct + gap_fade_0907_to_940_pct to reconstruct 09:40 % from prev_close
+        # Actually simpler: stock_pct = gap_0907_pct + gap_fade_0907_to_940_pct (both relative)
+        # But most accurate: we stored entry_price_0940 and Gap_Pct is based on open, not prev_close
+        # Reconstruct: stock_pct = (p_940 / p_prev_close - 1) * 100
+        # = gap_0907_pct + gap_fade_0907_to_940_pct (approximately)
+        df_ranked['stock_pct_940'] = df_ranked['gap_0907_pct'] + df_ranked['gap_fade_0907_to_940_pct']
+    else:
+        df_ranked['stock_pct_940'] = 0.0
+
+    def apply_rules(row):
+        spct = row['stock_pct_940']
+
+        # RULE 1: Always skip if stock is down more than -1.0%
+        if spct < -1.0:
+            return False, "RULE1: Stock dropped > 1.0%"
+
+        # RULE 2: Crash Day Protector
+        # If Nifty is down more than -0.5%, be stricter on the stock
+        if nifty_pct < -0.5 and spct < -0.5:
+            return False, f"RULE2: Nifty({nifty_pct:+.2f}%) crash & Stock({spct:+.2f}%)"
+
+        # RULE 3: Monday Danger Rule
+        # Monday mornings have max buy-the-dip pressure, be stricter
+        if today_dow == 0 and spct < -0.5:
+            return False, f"RULE3: Monday & Stock({spct:+.2f}%)"
+
+        return True, None
+
+    # ===================================================================
+    # CRITICAL: Filter is applied ONLY to the original top 4 predictions.
+    # Blocked stocks are SKIPPED — NOT replaced with lower-ranked stocks.
+    # Historical backtest (rebuild_filter_sim.py) proved replacements HURT.
+    # ===================================================================
+    original_top4 = df_ranked.head(4).copy()
+
+    print(f"\n   🛡️ APPLYING FILTER RULES TO ORIGINAL TOP 4 CANDIDATES:")
+    passed = []
+    blocked_list = []
+
+    # Determine active market rule label
+    if nifty_pct < -0.5:
+        active_rule_msg = f"🔴 CRASH DAY (Nifty {nifty_pct:+.2f}%). Strict filters active."
+    elif today_dow == 0:
+        active_rule_msg = f"📅 MONDAY. Max buy-the-dip pressure. Strict filters active."
+    else:
+        active_rule_msg = f"🟢 NORMAL DAY (Nifty {nifty_pct:+.2f}%). Standard filters active."
+
+    for _, row in original_top4.iterrows():
+        ok, reason = apply_rules(row)
+        if ok:
+            passed.append(row)
+            print(f"      ✅ TRADING  {row['clean_stock']:12} | stock%: {row['stock_pct_940']:+.2f}%")
+        else:
+            blocked_list.append({
+                'stock': row['clean_stock'],
+                'entry': float(row['entry_price_0940']),
+                'qty': int(500000.0 / float(row['entry_price_0940'])),
+                'reason': reason
+            })
+            print(f"      ⛔ SKIPPED  {row['clean_stock']:12} | stock%: {row['stock_pct_940']:+.2f}% | Reason: {reason}")
+
+    if not passed:
+        print("   ⚠️ All 4 original candidates blocked. 0 trades today (no replacements).")
+        return pd.DataFrame(), blocked_list, active_rule_msg
+
+    df_plan = pd.DataFrame(passed).reset_index(drop=True)
+    df_plan['signal_type'] = 'TOP 4'
+    df_plan['lots_to_trade'] = 1
+    print(f"   ✅ {len(df_plan)} of 4 original candidates passed filters — trading these only.")
+    return df_plan, blocked_list, active_rule_msg
+
 
 def append_to_daily_ledger(target_date_str, df_plan):
     for f_path in [LEDGER_CSV, AUDIT_CSV]:
@@ -309,29 +421,49 @@ def append_to_daily_ledger(target_date_str, df_plan):
         except Exception as e:
             print(f"⚠️ Could not append to {f_path}: {e}")
 
-def format_telegram_alert(df_plan, target_date_str):
+def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_rule_msg=None):
     day_name = pd.to_datetime(target_date_str).strftime('%A')
+    n_traded  = len(df_plan)
+    n_blocked = len(blocked_stocks) if blocked_stocks else 0
     lines = [
         f"📉 <b>HYBRID SHORT SELL ORDERS ({target_date_str} - {day_name})</b>",
         f"⏰ <b>Entry:</b> 09:42:00 AM IST | <b>Exit:</b> 14:45:00 PM IST",
-        f"🛡️ <b>Stop Loss:</b> 3.0% (Tick-by-Tick) | <b>Total Lots:</b> ₹20L Budget (Fixed ₹5L per Trade)",
+        f"🛡️ <b>Stop Loss:</b> 3.0% (Tick-by-Tick) | <b>Budget:</b> Fixed ₹5L per Trade",
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"🎯 <b>TOP 4 SHORT SELL SELECTIONS</b>",
-        f"<i>Strictly adhering to certified historical model</i>",
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     ]
+
+    if active_rule_msg:
+        lines.append(f"📊 <b>Market Status:</b> {active_rule_msg}")
+        lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    lines.append(f"🎯 <b>MODEL TOP 4 PREDICTIONS</b>  |  ✅ {n_traded} Trading  ⛔ {n_blocked} Skipped")
+    lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    # Traded stocks
     for idx, row in df_plan.iterrows():
         stock = row['clean_stock']
-        entry = row['entry_price_0940']
-        sl = entry * 1.03
-        lots = row['lots_to_trade']
-        qty = row.get('total_quantity', 1)
-        lines.append(f"<b>#{idx+1}. {stock}</b>")
+        entry = float(row['entry_price_0940'])
+        sl    = entry * 1.03
+        qty   = int(row.get('total_quantity', int(500000.0 / entry)))
+        lines.append(f"✅ <b>{stock}</b>")
         lines.append(f"  • <b>Action:</b> SHORT SELL {qty} QTY (₹5L Notional)")
-        lines.append(f"  • <b>Est. Entry (09:42):</b> ₹{entry:,.2f}")
-        lines.append(f"  • <b>Stop Loss (3.0%):</b> ₹{sl:,.2f}")
+        lines.append(f"  • <b>Entry:</b> ₹{entry:,.2f}  |  <b>SL:</b> ₹{sl:,.2f}")
         lines.append(f"------------------------------------")
-    lines.append(f"⚡ <i>Automated from sarang_shortsell_t1_2026 — Certified 09:42 Hybrid Model</i>")
+
+    # Skipped stocks — same card style, just marked ⛔
+    if blocked_stocks:
+        for b in blocked_stocks:
+            entry = b.get('entry', 0)
+            qty   = b.get('qty', 0)
+            sl    = entry * 1.03 if entry else 0
+            lines.append(f"⛔ <b>{b['stock']}</b>  <i>(SKIPPED)</i>")
+            lines.append(f"  • <b>Would have been:</b> SHORT SELL {qty} QTY (₹5L Notional)")
+            lines.append(f"  • <b>Price:</b> ₹{entry:,.2f}  |  <b>SL:</b> ₹{sl:,.2f}")
+            lines.append(f"  • <b>Reason:</b> {b['reason']}")
+            lines.append(f"------------------------------------")
+
+    lines.append(f"")
+    lines.append(f"⚡ <i>Automated — sarang_shortsell_t1_2026 09:42 Hybrid</i>")
     return "\n".join(lines)
 
 def send_telegram_alert(message):
@@ -380,10 +512,13 @@ def main():
     df_features = df_features[df_features['entry_price_0940'] >= 50].reset_index(drop=True)
     print(f"   • Total candidate stocks scored (Price >= ₹50): {len(df_features)}")
 
-    df_plan = train_and_predict_single(df_features)
+    df_plan, blocked_stocks, active_rule_msg = train_and_predict_single(df_features)
 
     if len(df_plan) == 0:
-        print("⚠️ No trades selected for today.")
+        print("⚠️ No trades selected for today (all blocked).")
+        msg = format_telegram_alert(df_plan, target_date_str, blocked_stocks, active_rule_msg)
+        print(msg)
+        send_telegram_alert(msg)
         return
 
     print("\n" + "="*83)
@@ -403,8 +538,15 @@ def main():
     print(f"\n✅ Saved live prediction orders to: {PRED_CSV}")
     append_to_daily_ledger(target_date_str, df_plan)
 
+    # Insert into shortsell_orders table for automated Kotak MIS order placement
+    print(f"\n📋 Inserting into shortsell_orders for Kotak MIS automation...")
+    if _insert_ss_orders:
+        _insert_ss_orders(df_plan, model_name='0942_HYBRID', trade_date=target_date_str, blocked_stocks=blocked_stocks)
+    else:
+        print("  ⚠️  insert_shortsell_orders not available — skipping DB insert")
+
     print("\n3. Formatting and sending Telegram Bot Alert...")
-    msg = format_telegram_alert(df_plan, target_date_str)
+    msg = format_telegram_alert(df_plan, target_date_str, blocked_stocks, active_rule_msg)
     print(msg)
     send_telegram_alert(msg)
     print("\n🎉 Live 09:40 Certified Model Pipeline Completed Successfully!")

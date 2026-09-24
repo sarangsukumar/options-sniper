@@ -25,6 +25,13 @@ import lightgbm as lgb
 from datetime import datetime, date
 import warnings
 
+# Insert short-sell orders into DB for automated Kotak MIS placement
+sys.path.insert(0, '/home/ubuntu/KotakCodes1')
+try:
+    from insert_shortsell_orders import insert_shortsell_orders as _insert_ss_orders
+except ImportError:
+    _insert_ss_orders = None
+
 warnings.filterwarnings('ignore')
 
 # Configuration & Paths
@@ -36,8 +43,10 @@ OUTPUT_CSV = os.path.join(SCRIPT_DIR, 'live_0920_predictions_today.csv')
 LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0920_live_ledger.csv')
 
 FEATURES = [
-    'prev_intraday_vwap_gap', 'prev_intraday_roc_last_hour', 'prev_intraday_return',
-    'positive_arc_ratio', 'Gap_Pct', 'gap_0907_pct', 'morn_range_pct', 'rejection_wick'
+    'morn_range_pct', 'prev_intraday_vwap_gap', 'prev_intraday_roc_last_hour',
+    'prev_intraday_return', 'positive_arc_ratio', 'Gap_Pct', 'gap_0907_pct',
+    'rejection_wick', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap',
+    'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap'
 ]
 
 # Official NSE F&O Universe (180+ Liquid Contract Stocks)
@@ -362,6 +371,14 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
 
     # Append to Master Daily Ledger
     append_to_daily_ledger(target_date_str, top4)
+
+    # Insert into shortsell_orders table for automated Kotak MIS order placement
+    print(f"\n📋 Inserting into shortsell_orders for Kotak MIS automation...")
+    if _insert_ss_orders:
+        top4_for_insert = top4.rename(columns={'close_0919': 'close_0919', 'lotsize': 'quantity'})
+        _insert_ss_orders(top4_for_insert, model_name='0920_SCALP', trade_date=target_date_str)
+    else:
+        print("  ⚠️  insert_shortsell_orders not available — skipping DB insert")
 
     # 6. Format and Send Telegram Message
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')
