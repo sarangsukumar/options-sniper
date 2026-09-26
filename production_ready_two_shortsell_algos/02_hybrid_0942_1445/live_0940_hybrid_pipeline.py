@@ -321,6 +321,33 @@ def train_and_predict_single(df_today):
         print(f"      Nifty @ 09:40    : {nifty_940_price:.2f}")
         print(f"      Nifty % Change   : {nifty_pct:+.2f}%")
         print(f"      Day of Week      : {'Monday' if today_dow==0 else ['Tue','Wed','Thu','Fri'][today_dow-1]}")
+
+        print("   🔍 Checking 09:20-09:40 Market Breadth (Oversold Filter)...")
+        breadth_win_rate = 50.0
+        try:
+            _bconn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
+            _bcur = _bconn.cursor()
+            _bcur.execute(f"""
+                SELECT stockname, TIME(time) as tm, close 
+                FROM scrapdata 
+                WHERE date = '{today_str}'
+                AND TIME(time) IN ('09:20:00', '09:40:00')
+            """)
+            cur = _bcur
+            rows = cur.fetchall()
+            bdf = pd.DataFrame(rows, columns=['stockname', 'tm', 'close'])
+            if not bdf.empty:
+                pivot = bdf.pivot_table(index='stockname', columns='tm', values='close', aggfunc='last')
+                if '09:20:00' in pivot.columns and '09:40:00' in pivot.columns:
+                    pivot['ret'] = (pivot['09:40:00'] - pivot['09:20:00']) / pivot['09:20:00'] * 100
+                    pivot = pivot.dropna()
+                    if len(pivot) > 10:
+                        breadth_win_rate = (pivot['ret'] > 0).mean() * 100
+            print(f"      09:20-09:40 Win Rate: {breadth_win_rate:.1f}%")
+            _bconn.close()
+        except Exception as e:
+            print(f"      ⚠️ Could not fetch market breadth: {e}")
+
     except Exception as e:
         print(f"   ⚠️ Could not fetch Nifty live data: {e}. Filters defaulting to Rule 1 only.")
         nifty_pct = 0.0
@@ -354,6 +381,19 @@ def train_and_predict_single(df_today):
         # Monday mornings have max buy-the-dip pressure, be stricter
         if today_dow == 0 and spct < -0.5:
             return False, f"RULE3: Monday & Stock({spct:+.2f}%)"
+
+        # RULE 4: Extreme Oversold Protector
+        # If fewer than 10% of stocks went up between 09:20 and 09:40, the market is severely crashed and bouncing.
+        if breadth_win_rate < 10.0:
+            return False, f"RULE4: Market Crashed! (Breadth Win% = {breadth_win_rate:.1f}%)"
+
+        # RULE 5: VWAP Exhaustion Filter (Individual Stock)
+        # If stock closed more than 0.52% BELOW its own VWAP yesterday, short-sellers are
+        # heavily crowded. Next morning it is highly prone to a short-covering bounce trap.
+        # Backtest (2020-2026): Blocked 1,213 trades with avg PnL of -374 per trade.
+        prev_vwap_gap = row.get('prev_intraday_vwap_gap', 0.0)
+        if prev_vwap_gap < -0.52:
+            return False, f"RULE5: VWAP Exhausted (Prev VWAP Gap = {prev_vwap_gap:+.2f}%)"
 
         return True, None
 
