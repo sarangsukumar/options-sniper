@@ -126,3 +126,22 @@ ML Model → Filter Rules → shortsell_orders DB (isvalid=TRUE/FALSE)
 - `2` → filled
 - `3` → failed/rejected
 - `4` → skipped (already in position)
+
+---
+
+## 📅 2026 Monthly Breakdown (5-Filter Applied)
+
+| 2026 Month | Net PnL (₹) |
+|---|---|
+| 2026-Jan | + ₹ 1.06 L |
+| 2026-Feb | + ₹ 2.24 L |
+| 2026-Mar | + ₹ 0.49 L |
+| 2026-Apr | + ₹ 0.07 L |
+| 2026-May | + ₹ 0.14 L |
+| 2026-Jun | + ₹ 0.16 L |
+| 2026-Jul | + ₹ 0.65 L |
+| 2026-Aug | + ₹ 0.21 L |
+| 2026-Sep | + ₹ 0.04 L |
+| **TOTAL** | **+ ₹ 5.06 L** |
+
+*(Config: Fixed ₹10L Capital per trade)*

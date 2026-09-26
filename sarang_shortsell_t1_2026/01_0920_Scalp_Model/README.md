@@ -96,3 +96,21 @@ See `ML_Model_Audit_Report.md` for the full detailed report.
 ---
 
 *Audited by Antigravity AI Independent Verifier | 21 September 2026*
+
+---
+
+## 📅 2026 Monthly Breakdown
+
+| 2026 Month | Net PnL (₹) | Win Rate |
+|---|---|---|
+| 2026-Jan | + ₹ 2.50 L | 73.3% |
+| 2026-Feb | - ₹ 0.10 L | 52.6% |
+| 2026-Mar | + ₹ 1.23 L | 61.8% |
+| 2026-Apr | + ₹ 1.67 L | 70.8% |
+| 2026-May | + ₹ 1.05 L | 65.2% |
+| 2026-Jun | + ₹ 1.54 L | 69.9% |
+| 2026-Jul | + ₹ 2.10 L | 69.3% |
+| 2026-Aug | + ₹ 0.78 L | 88.2% |
+| **TOTAL** | **+ ₹ 10.77 L** | **65.8%** |
+
+*(Config: Fixed ₹10L Capital per trade)*
