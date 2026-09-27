@@ -162,8 +162,8 @@ def append_to_daily_ledger(target_date_str, top4_df):
 def retrain_and_save_model():
     """
     Retrain the 0920 Scalp model using Expanding Window (All Data) + Time-Decay.
-    Run this every Friday evening via cron:
-      0 18 * * 5 python3 live_0920_scalp_pipeline.py --retrain
+    Run this on the 1st of every month via cron:
+      45 17 1 * * python3 live_0920_scalp_pipeline.py --retrain
     """
     import lightgbm as lgb
     print("\n🔁 RETRAINING: 09:20 Scalp Model (Expanding Window + Time-Decay)...")
