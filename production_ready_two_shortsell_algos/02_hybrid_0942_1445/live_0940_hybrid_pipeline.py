@@ -44,6 +44,14 @@ AUDIT_CSV = os.path.join(BASE_DIR, 'audited_0940_hybrid_trades.csv')
 SARANG_DIR = BASE_DIR
 
 PURE_DB_FEATURES = [
+    'gap_abs', 'vol_gap_combo', 'stock_ret_940', 'morn_range_pct', 'rejection_wick',
+    'gap_0907_pct', 'gap_fade_0907_to_940_pct', 'prev_intraday_return', 'prev_intraday_vwap_gap',
+    'morning_momentum', 'morning_vol_trend', 'nifty_gap', 'sp500_overnight_ret',
+    'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap'
+]
+
+# Legacy features still computed from live DB (kept for compatibility)
+LEGACY_DB_FEATURES = [
     'gap_0907_pct', 'gap_fade_0907_to_940_pct', 'prev_intraday_vwap_gap',
     'prev_intraday_return', 'prev_intraday_roc_last_hour', 'morn_range_pct',
     'rejection_wick', 'prev_1450_to_1519_pct', 'Gap_Pct',
@@ -263,36 +271,79 @@ def load_historical_dataset_with_macro(dataset_path):
     df_hist = df_hist.merge(global_macro, left_on=date_col, right_on='date_str', how='left')
     return df_hist
 
+def retrain_and_save_model():
+    """
+    Retrain the Huber Loss + Time-Decay model on the latest 4 years of data
+    and save it to disk. Run every Friday evening:
+      0 18 * * 5 python3 live_0940_hybrid_pipeline.py --retrain
+    """
+    from dateutil.relativedelta import relativedelta
+    print("\n🔁 RETRAINING: Huber Loss + 4-Year Rolling Window + Time-Decay Model...")
+    df_hist = load_historical_dataset_with_macro(HIST_DATASET)
+    df_hist['date_obj'] = pd.to_datetime(df_hist.get('date_str', df_hist.get('buy_day', '')))
+    for f in PURE_DB_FEATURES:
+        if f not in df_hist.columns: df_hist[f] = 0.0
+        df_hist[f] = pd.to_numeric(df_hist[f], errors='coerce').fillna(0.0)
+
+    if 'target' not in df_hist.columns:
+        if 'short_exit_price' in df_hist.columns and 'short_entry_price' in df_hist.columns:
+            df_hist['target'] = (df_hist['short_exit_price'] - df_hist['short_entry_price']) / df_hist['short_entry_price'] * -100
+        else:
+            df_hist['target'] = df_hist.get('short_pct_return', 0.0)
+
+    today_date = pd.Timestamp.today().normalize()
+    train_start = today_date - relativedelta(years=4)
+    tr = df_hist[(df_hist['date_obj'] >= train_start) & (df_hist['date_obj'] < today_date)].copy()
+
+    # Exponential time-decay weights: recent data gets higher weight
+    tr['year'] = tr['date_obj'].dt.year
+    current_year = today_date.year
+    tr['weight'] = np.exp((tr['year'] - current_year) * 0.5)
+
+    params = {
+        'objective': 'huber',        # Robust to short-squeeze outliers
+        'alpha': 0.9,
+        'learning_rate': 0.05,
+        'max_depth': 4,
+        'num_leaves': 15,
+        'feature_fraction': 0.8,
+        'verbose': -1,
+        'random_state': 42,
+        'n_jobs': -1
+    }
+    dtrain = lgb.Dataset(tr[PURE_DB_FEATURES], label=tr['target'], weight=tr['weight'])
+    mod = lgb.train(params, dtrain, num_boost_round=100)
+    model_file = os.path.join(SCRIPT_DIR, 'lgb_0940_hybrid_huber_model.txt')
+    mod.save_model(model_file)
+    print(f"   ✅ Huber model saved → {model_file}")
+    return mod
+
 def train_and_predict_single(df_today):
-    model_file = os.path.join(SCRIPT_DIR, 'lgb_0940_hybrid_model.txt')
+    # Primary: load the latest Huber model retrained every Friday
+    model_file = os.path.join(SCRIPT_DIR, 'lgb_0940_hybrid_huber_model.txt')
+    # Legacy fallback path (old RMSE model)
+    legacy_model_file = os.path.join(SCRIPT_DIR, 'lgb_0940_hybrid_model.txt')
 
     if os.path.exists(model_file):
-        print("\n2. Loading Pre-Trained Certified LightGBM Model...")
+        print("\n2. Loading Pre-Trained Huber Model (4-Year Rolling, Time-Decay)...")
         mod = lgb.Booster(model_file=model_file)
-        print(f"   ✔ Model loaded: {model_file} ({len(mod.feature_name())} features)")
+        print(f"   ✔ Huber model loaded: {model_file} ({len(mod.feature_name())} features)")
+    elif os.path.exists(legacy_model_file):
+        print("\n2. ⚠️  Huber model not found — Loading Legacy RMSE model as fallback...")
+        mod = lgb.Booster(model_file=legacy_model_file)
+        print(f"   ✔ Legacy model loaded: {legacy_model_file}")
     else:
-        # Fallback: retrain from scratch (slow — run train_and_simulate_hybrid.py to pre-save model)
-        print("\n2. ⚠️  Model file not found — Training LightGBM from Historical Database (slow)...")
-        df_hist = load_historical_dataset_with_macro(HIST_DATASET)
-        for f in PURE_DB_FEATURES:
-            df_hist[f] = pd.to_numeric(df_hist[f], errors='coerce').fillna(0.0)
-        params_942 = {
-            'objective': 'regression', 'metric': 'rmse', 'boosting_type': 'gbdt',
-            'learning_rate': 0.05, 'max_depth': 5, 'num_leaves': 31,
-            'verbose': -1, 'random_state': 42
-        }
-        print("   • Training model...")
-        mod = lgb.train(
-            params_942,
-            lgb.Dataset(df_hist[PURE_DB_FEATURES], label=df_hist['short_pct_return']),
-            num_boost_round=100
-        )
-        mod.save_model(model_file)
-        print(f"   ✔ Model trained and saved to {model_file}")
+        print("\n2. ⚠️  No model file found — Training Huber model now (will save for future use)...")
+        mod = retrain_and_save_model()
 
     print("   • Scoring today's candidates...")
+    for f in PURE_DB_FEATURES:
+        if f not in df_today.columns:
+            df_today[f] = 0.0
+        df_today[f] = pd.to_numeric(df_today[f], errors='coerce').fillna(0.0)
     df_today['pred_return'] = mod.predict(df_today[PURE_DB_FEATURES])
     df_ranked = df_today.sort_values('pred_return', ascending=False).reset_index(drop=True)
+
 
     # =========================================================
     # APPROVED FILTER RULES (Zero Look-Ahead, Proven on 7 Years)
@@ -521,10 +572,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--date', type=str, help='Target date YYYY-MM-DD')
     parser.add_argument('--force-monday', action='store_true', help='Treat today as Monday')
+    parser.add_argument('--retrain', action='store_true', help='Retrain Huber model and save (run on Fridays)')
     args = parser.parse_args()
+
+    # Weekly retrain mode — retrain and save model, then exit
+    if args.retrain:
+        retrain_and_save_model()
+        print("\n✅ Retrain complete. Model saved. Exiting.")
+        return
 
     target_date_str = args.date if args.date else datetime.now().strftime('%Y-%m-%d')
     day_name = pd.to_datetime(target_date_str).strftime('%A')
+
 
     print("="*83)
     print("🚀 LIVE 09:40 AM SHORT SELL MODEL (CERTIFIED 1-LOT TOP 4 SELECTION)")
