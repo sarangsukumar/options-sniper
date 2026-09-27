@@ -7,7 +7,7 @@
 # 1. 09:20 SCALP ENGINE (20-Minute Rapid Mean-Reversion)
 # Execution: Starts at 09:20:20 IST (20s buffer for 09:15-09:20 candle data ingestion)
 # Square-off: 09:40:00 AM SHARP (100% Margin Released back to Cash)
-20 9 * * 1-5 bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/01_scalp_0920_0940/run_0920_scalp_pipeline.sh >> /home/ubuntu/cron_0920_scalp.log 2>&1
+20 9 * * 1-5 sleep 20 && bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/01_scalp_0920_0940/run_0920_scalp_pipeline.sh >> /home/ubuntu/cron_0920_scalp.log 2>&1
 
 # 1B. 09:20 SCALP SIMULATED PNL RECONCILER & AUDIT REPORT
 # Runs after market close at 16:00:00 PM IST (Mon-Fri)
@@ -17,7 +17,7 @@
 # Execution: Starts at 09:41:20 IST (20s buffer for 09:15-09:40 ICICI data ingestion)
 # Entry: 09:42:00 AM IST (Re-deploys ₹6.0L freed capital)
 # Square-off: 14:45:00 PM IST (with 3.0% Stop Loss & optional 11:30 AM Cut-Loss exit)
-41 9 * * 1-5 bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/02_hybrid_0942_1445/run_0940_hybrid_pipeline.sh >> /home/ubuntu/cron_0940_hybrid.log 2>&1
+41 9 * * 1-5 sleep 20 && bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/02_hybrid_0942_1445/run_0940_hybrid_pipeline.sh >> /home/ubuntu/cron_0940_hybrid.log 2>&1
 
 # 2B. 09:40 HYBRID SIMULATED PNL RECONCILER & AUDIT REPORT
 # Runs after market close at 16:00:20 PM IST (Mon-Fri)
