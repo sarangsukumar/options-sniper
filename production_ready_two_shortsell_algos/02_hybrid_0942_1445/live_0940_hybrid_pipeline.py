@@ -274,8 +274,8 @@ def load_historical_dataset_with_macro(dataset_path):
 def retrain_and_save_model():
     """
     Retrain the Huber Loss + Time-Decay model on the latest 4 years of data
-    and save it to disk. Run every Friday evening:
-      0 18 * * 5 python3 live_0940_hybrid_pipeline.py --retrain
+    and save it to disk. Run on the 1st of every month:
+      0 18 1 * * python3 live_0940_hybrid_pipeline.py --retrain
     """
     from dateutil.relativedelta import relativedelta
     print("\n🔁 RETRAINING: Huber Loss + 4-Year Rolling Window + Time-Decay Model...")
