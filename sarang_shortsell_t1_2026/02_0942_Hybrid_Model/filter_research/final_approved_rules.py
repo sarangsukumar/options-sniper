@@ -13,11 +13,11 @@ features = features.merge(df_open[['Date', '^NSEI']].rename(columns={'Date':'dat
 features['nifty_gap'] = ((features['nifty_open'] / features['nifty_close'].shift(1)) - 1) * 100
 features['nifty_gap'] = features['nifty_gap'].fillna(0)
 
-pnl = pd.read_csv('0942_verified_pnl_sheet.csv')
+pnl = pd.read_csv('../0942_verified_pnl_sheet.csv')
 pnl['Year'] = pd.to_datetime(pnl['Date']).dt.year
 pnl['Stock_clean'] = pnl['Stock'].astype(str).str.strip().str.upper()
 
-df = pd.read_csv('data/short_sell_ml_dataset_v5_scratch.csv', low_memory=False)
+df = pd.read_csv('../data/short_sell_ml_dataset_v5_scratch.csv.gz', low_memory=False)
 df['clean_stock'] = df['clean_stock'].astype(str).str.strip().str.upper()
 
 merged = pnl.merge(df[['date_str','clean_stock','prev_close']], left_on=['Date','Stock_clean'], right_on=['date_str','clean_stock'], how='inner')

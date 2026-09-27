@@ -79,7 +79,9 @@ def audit_trade(row):
     }
 
 print("1. Loading Predictions...")
-preds = pd.read_csv(os.path.join(BASE_DIR, '0942_predictions.csv'))
+import sys
+pred_file = sys.argv[1] if len(sys.argv) > 1 else '0942_predictions.csv'
+preds = pd.read_csv(os.path.join(BASE_DIR, pred_file))
 
 print(f"2. Auditing {len(preds)} Trades against MySQL Ticks (Max 3-Min Liquidity Windows)...")
 results = []
