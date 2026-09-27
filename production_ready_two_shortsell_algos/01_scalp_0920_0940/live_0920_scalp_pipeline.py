@@ -159,6 +159,47 @@ def append_to_daily_ledger(target_date_str, top4_df):
         df_new.to_csv(LEDGER_CSV, index=False)
         print(f"✔ Created new persistent ledger: {LEDGER_CSV}")
 
+def retrain_and_save_model():
+    """
+    Retrain the 0920 Scalp model using Expanding Window (All Data) + Time-Decay.
+    Run this every Friday evening via cron:
+      0 18 * * 5 python3 live_0920_scalp_pipeline.py --retrain
+    """
+    import lightgbm as lgb
+    print("\n🔁 RETRAINING: 09:20 Scalp Model (Expanding Window + Time-Decay)...")
+    dataset_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/01_0920_Scalp_Model/data/scalp_0920_ml_dataset.csv.gz'
+    df = pd.read_csv(dataset_path, low_memory=False)
+    df['date_obj'] = pd.to_datetime(df['short_date'])
+    df['year'] = df['date_obj'].dt.year
+
+    for f in FEATURES:
+        if f not in df.columns: df[f] = 0.0
+        df[f] = pd.to_numeric(df[f], errors='coerce').fillna(0.0)
+
+    df['target'] = (df['pnl_net'] > 0).astype(int)
+    
+    current_year = pd.Timestamp.today().year
+    df['weight'] = np.exp((df['year'] - current_year) * 0.5)
+
+    params = {
+        'objective': 'binary',
+        'metric': 'auc',
+        'learning_rate': 0.05,
+        'max_depth': 5,
+        'num_leaves': 31,
+        'feature_fraction': 0.8,
+        'verbose': -1,
+        'random_state': 42
+    }
+    
+    dtrain = lgb.Dataset(df[FEATURES], label=df['target'], weight=df['weight'])
+    mod = lgb.train(params, dtrain, num_boost_round=300)
+    
+    mod.save_model(MODEL_FILE)
+    print(f"   ✅ 09:20 Scalp model saved → {MODEL_FILE}")
+    return mod
+
+
 def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     start_time = datetime.now()
     print("=" * 75)
@@ -184,11 +225,13 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         print("❌ Error: Unable to determine prior trading date from MySQL scrapdata.")
         return
 
-    # Load pre-trained LightGBM model
-    if not os.path.exists(MODEL_FILE):
-        print(f"❌ Error: Model file not found at {MODEL_FILE}")
-        return
-    model = lgb.Booster(model_file=MODEL_FILE)
+    # Load or retrain pre-trained LightGBM model
+    if os.path.exists(MODEL_FILE):
+        print(f"\n[INIT] Loading Pre-Trained 0920 LightGBM Model (Time-Decay Weighted)...")
+        model = lgb.Booster(model_file=MODEL_FILE)
+    else:
+        print(f"\n[INIT] ⚠️ Model file not found. Retraining now...")
+        model = retrain_and_save_model()
 
     # Fetch today's global macro features via yfinance (matches training logic exactly)
     print(f"\n0. Fetching Global Macro Features (Nifty/S&P500/Nikkei) via yfinance...")
@@ -417,6 +460,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="09:20 - 09:40 Scalp Engine Live Runner")
     parser.add_argument('--date', type=str, default=None, help="Target Date YYYY-MM-DD (defaults to latest in DB)")
     parser.add_argument('--no-telegram', action='store_true', help="Skip sending Telegram alert")
+    parser.add_argument('--retrain', action='store_true', help="Retrain model and exit (weekly cron)")
     args = parser.parse_args()
 
-    run_scalp_pipeline(target_date_str=args.date, no_telegram=args.no_telegram)
+    if args.retrain:
+        retrain_and_save_model()
+        print("\n✅ Retrain complete. Model saved. Exiting.")
+    else:
+        run_scalp_pipeline(target_date_str=args.date, no_telegram=args.no_telegram)
