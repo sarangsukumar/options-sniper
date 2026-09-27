@@ -10,7 +10,7 @@ Triggered at 09:20:20 AM IST Mon-Fri:
 2. Performs instant inference using pre-trained LightGBM walk-forward model.
 3. Ranks candidates and selects Top 4 weakest stocks for opening scalp short-sell.
 4. Fixed ₹5,00,000 notional equity per trade: qty = int(500000 / cmp_0919).
-5. Formulates 09:22:00 Entry -> 09:40:00 Exit order plan and alerts Telegram bot.
+5. Formulates 09:25:00 Entry -> 09:40:00 Exit order plan and alerts Telegram bot.
 =============================================================================
 """
 
@@ -122,7 +122,7 @@ def append_to_daily_ledger(target_date_str, top4_df):
             'short_prob': round(float(row['short_prob']), 4),
             'close_0919': round(float(row['close_0919']), 2),
             'qty': int(row['lotsize']),
-            'entry_time': '09:22:00',
+            'entry_time': '09:25:00',
             'entry_price': np.nan,
             'exit_time': '09:40:00',
             'exit_price': np.nan,
@@ -402,7 +402,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     top4 = df_candidates.head(4).copy()
 
     print("\n" + "=" * 75)
-    print("🎯 TOP 4 09:20 SCALP CANDIDATES (09:22 ENTRY -> 09:40 EXIT):")
+    print("🎯 TOP 4 09:20 SCALP CANDIDATES (09:25 ENTRY -> 09:40 EXIT):")
     print("=" * 75)
     for idx, row in top4.iterrows():
         print(f"#{idx+1} | {row['stockname'].ljust(12)} | Prob: {row['short_prob']*100:.1f}% | CMP: ₹{row['close_0919']:.2f} | Qty: {row['lotsize']} | Wick: {row['rejection_wick']:.2f}")
@@ -428,7 +428,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     lines = [
         f"⚡ <b>[09:20 SCALP ENGINE: 20-MIN SHORT SELL SELECTION]</b>",
         f"📅 <b>Date:</b> {target_date_str} | ⏱️ <b>Generated:</b> {now_str}",
-        f"🎯 <b>Holding Window:</b> 09:22 AM Entry ➔ 09:40 AM Exit (18 Mins)",
+        f"🎯 <b>Holding Window:</b> 09:25 AM Entry ➔ 09:40 AM Exit (15 Mins)",
         f"📊 <b>Model Edge:</b> 64.83% Historical Win Rate | +₹61.22L Net PnL",
         "",
         "<b>🔻 TARGET 4 SHORT-SELL ORDERS:</b>"
@@ -444,8 +444,8 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     lines.extend([
         "",
         "⏱️ <b>Execution Rules:</b>",
-        "• <b>Entry:</b> Sell at Market at 09:22:00 AM IST",
-        "• <b>Exit:</b> Unconditional Square-Off at 09:40:00 AM IST (Strict 18-min Hold)",
+        "• <b>Entry:</b> Sell at Market at 09:25:00 AM IST",
+        "• <b>Exit:</b> Unconditional Square-Off at 09:40:00 AM IST (Strict 15-min Hold)",
         "• <b>Risk:</b> Zero midday exposure, zero afternoon chop risk."
     ])
 

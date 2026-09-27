@@ -32,12 +32,12 @@ else
     exit 1
 fi
 
-# Step 3: Wait until exactly 09:22:00 IST to match historical ML physics
-echo "[Step 3/4] Waiting until exactly 09:22:00 IST to execute orders..." >> "$LOG_FILE"
-while [[ $(date +%H:%M:%S) < "09:22:00" ]]; do
+# Step 3: Wait until exactly 09:25:00 IST to hit the Goldilocks execution peak
+echo "[Step 3/4] Waiting until exactly 09:25:00 IST to execute orders..." >> "$LOG_FILE"
+while [[ $(date +%H:%M:%S) < "09:25:00" ]]; do
     sleep 0.5
 done
-echo "✔ Reached 09:22:00 IST. Firing Kotak API." >> "$LOG_FILE"
+echo "✔ Reached 09:25:00 IST. Firing Kotak API." >> "$LOG_FILE"
 
 # Step 4: Trigger Kotak Order Placer
 echo "[Step 4/4] Triggering Kotak Order Execution Script..." >> "$LOG_FILE"
