@@ -438,15 +438,18 @@ def train_and_predict_single(df_today):
         if breadth_win_rate < 10.0:
             return False, f"RULE4: Market Crashed! (Breadth Win% = {breadth_win_rate:.1f}%)"
 
-        # RULE 5: VWAP Exhaustion Filter (Individual Stock)
-        # If stock closed more than 0.52% BELOW its own VWAP yesterday, short-sellers are
-        # heavily crowded. Next morning it is highly prone to a short-covering bounce trap.
-        # Backtest (2020-2026): Blocked 1,213 trades with avg PnL of -374 per trade.
-        prev_vwap_gap = row.get('prev_intraday_vwap_gap', 0.0)
-        if prev_vwap_gap < -0.52:
-            return False, f"RULE5: VWAP Exhausted (Prev VWAP Gap = {prev_vwap_gap:+.2f}%)"
+        # RULE 5: VWAP Exhaustion Filter — DISABLED for Huber Model
+        # The Huber Loss + Time-Decay model is inherently robust to VWAP-exhausted outlier setups
+        # via its Huber objective. Backtesting (2020-2026) showed this filter reduces performance
+        # with the Huber model:  2025: -2L, 2026: -1.5L vs keeping all trades.
+        # ⟶ Re-enable if switching back to RMSE objective model.
+        # prev_vwap_gap = row.get('prev_intraday_vwap_gap', 0.0)
+        # if prev_vwap_gap < -0.52:
+        #     return False, f"RULE5: VWAP Exhausted (Prev VWAP Gap = {prev_vwap_gap:+.2f}%)"
 
         return True, None
+
+
 
     # ===================================================================
     # CRITICAL: Filter is applied ONLY to the original top 4 predictions.
