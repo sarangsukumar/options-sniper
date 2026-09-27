@@ -32,13 +32,20 @@ else
     exit 1
 fi
 
-# Step 3: Immediately Trigger Kotak Order Placer
-echo "[Step 3/3] Triggering Kotak Order Execution Script..." >> "$LOG_FILE"
+# Step 3: Wait until exactly 09:22:00 IST to match historical ML physics
+echo "[Step 3/4] Waiting until exactly 09:22:00 IST to execute orders..." >> "$LOG_FILE"
+while [[ $(date +%H:%M:%S) < "09:22:00" ]]; do
+    sleep 0.5
+done
+echo "✔ Reached 09:22:00 IST. Firing Kotak API." >> "$LOG_FILE"
+
+# Step 4: Trigger Kotak Order Placer
+echo "[Step 4/4] Triggering Kotak Order Execution Script..." >> "$LOG_FILE"
 cd /home/ubuntu/KotakCodes1
 if python3 Neo_shortsell_mis_order.py 0920_SCALP >> "$LOG_FILE" 2>&1; then
-    echo "✔ Step 3 (Order Placement) completed successfully." >> "$LOG_FILE"
+    echo "✔ Step 4 (Order Placement) completed successfully." >> "$LOG_FILE"
 else
-    echo "❌ Error: Step 3 (Order Placement) failed." >> "$LOG_FILE"
+    echo "❌ Error: Step 4 (Order Placement) failed." >> "$LOG_FILE"
 fi
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] 🎉 09:20 Scalp Production Pipeline Finished Successfully." >> "$LOG_FILE"
