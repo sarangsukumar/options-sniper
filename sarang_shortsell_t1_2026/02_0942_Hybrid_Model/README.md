@@ -135,8 +135,7 @@ production_ready_two_shortsell_algos/02_hybrid_0942_1445/live_0940_hybrid_pipeli
 - `09:42:00 AM` → `Neo_shortsell_mis_order.py` precisely places entry SELL limit orders at the live 09:42 LTP. Includes time-based Kotak order book filtering to avoid colliding with 09:20 Scalp model trades.
 - `10:00:00 AM` → `confirm_0942_fills.py` audits Kotak API to record exact average execution prices into `scalp_trade_log`.
 - `14:45:00 PM` → **14:45 Chaser Exit Loop** triggered (`Neo_shortsell_mis_order.py SQUAREOFF_CHASE 1445`). Loops every 20 seconds, verifying cancellations and placing fresh limit cover orders at live LTP until fully flat.
-- `16:10:00 PM` → Evening reconciliation & PnL audit, sends Telegram report.
-- `18:00 PM (Fri)` → Weekly retrain (`python3 live_0940_hybrid_pipeline.py --retrain`). Saves updated weights for Monday.
+- `18:00 PM (1st of Month)` → Monthly retrain (`python3 live_0940_hybrid_pipeline.py --retrain`). Saves updated weights.
 
 **To manually retrain:**
 ```bash
@@ -151,7 +150,7 @@ python3 live_0940_hybrid_pipeline.py --retrain
 |------|--------|
 | 21 Sep 2026 | Initial repo created. Baseline RMSE annual model. ₹72L certified. |
 | 26 Sep 2026 | Synced 2026 OOS trades. Updated READMEs with monthly breakdowns. |
-| 27 Sep 2026 | **Major:** ML sweep completed. Huber + 4-Year Rolling architecture selected. ₹1.37 Cr certified. Rule 5 disabled for Huber model. Weekly retrain cron added. Live pipeline upgraded. |
+| 27 Sep 2026 | **Major:** ML sweep completed. Huber + 4-Year Rolling architecture selected. ₹1.37 Cr certified. Rule 5 disabled for Huber model. Monthly retrain cron added. Live pipeline upgraded. |
 
 ---
 

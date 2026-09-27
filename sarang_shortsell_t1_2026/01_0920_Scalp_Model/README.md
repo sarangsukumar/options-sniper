@@ -131,6 +131,12 @@ This single unified script handles the entire lifecycle:
 - **09:36–09:39 (SQUAREOFF mode):** Runs continuously every minute. Trailing exit logic triggers a Limit BUY cover order *only if* live profit is >0.05%. Updates ledger to `EXIT_PLACED`.
 - **09:40 (SQUAREOFF mode):** Blindly covers all remaining positions.
 
+**3. Automated Monthly Retraining (Self-Healing)**
+- Runs on the **1st of every month** at `17:45 PM IST`.
+- Automatically rebuilds the `scalp_0920_ml_dataset.csv.gz` with the latest market ticks.
+- Retrains the LightGBM model utilizing the absolute latest market structure.
+- Command: `python3 live_0920_scalp_pipeline.py --retrain`
+
 **Robust Safeguards Enabled:**
 - 🛡️ Strict order book time-filtering to ensure `0920_SCALP` model and `0942_HYBRID` model never step on each other's trades.
 - 🛡️ API cancellation verification: will never place a new cover order without absolute Kotak confirmation that an old pending order was successfully cancelled.
