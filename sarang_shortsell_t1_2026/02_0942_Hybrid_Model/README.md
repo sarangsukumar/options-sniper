@@ -123,7 +123,7 @@ All 16 model features are available **before** the 09:42 entry time:
 
 ---
 
-## 🔄 Live Production Integration
+## 🔄 Live Production Architecture & Duplicate Order Prevention
 
 The live pipeline is located at:
 ```
@@ -131,12 +131,12 @@ production_ready_two_shortsell_algos/02_hybrid_0942_1445/live_0940_hybrid_pipeli
 ```
 
 **Daily Schedule (cron):**
-```
-09:41 AM IST (Mon–Fri) → Loads Huber model → Scores stocks → Applies 4 Rules → Sends Telegram + Kotak orders
-16:00 PM IST (Mon–Fri) → Evening reconciliation & PnL audit
-18:00 PM IST (Fri)     → Weekly retrain: python3 live_0940_hybrid_pipeline.py --retrain
-                          Saves lgb_0940_hybrid_huber_model.txt for next week
-```
+- `09:41:30 AM` → Pulls 09:40 ICICI ticks, runs Huber ML model, applies 4 Live Filters, and inserts picks into `shortsell_orders`.
+- `09:42:00 AM` → `Neo_shortsell_mis_order.py` precisely places entry SELL limit orders at the live 09:42 LTP. Includes time-based Kotak order book filtering to avoid colliding with 09:20 Scalp model trades.
+- `10:00:00 AM` → `confirm_0942_fills.py` audits Kotak API to record exact average execution prices into `scalp_trade_log`.
+- `14:45:00 PM` → **14:45 Chaser Exit Loop** triggered (`Neo_shortsell_mis_order.py SQUAREOFF_CHASE 1445`). Loops every 20 seconds, verifying cancellations and placing fresh limit cover orders at live LTP until fully flat.
+- `16:10:00 PM` → Evening reconciliation & PnL audit, sends Telegram report.
+- `18:00 PM (Fri)` → Weekly retrain (`python3 live_0940_hybrid_pipeline.py --retrain`). Saves updated weights for Monday.
 
 **To manually retrain:**
 ```bash

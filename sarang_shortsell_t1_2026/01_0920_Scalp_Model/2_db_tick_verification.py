@@ -21,13 +21,13 @@ def audit_trade(row):
     conn = pymysql.connect(host='localhost', user='root', password='root', database='markets', cursorclass=pymysql.cursors.DictCursor)
     with conn.cursor() as cur:
         # Pull ticks from 09:22 to 09:45 (giving 5 mins buffer for the 09:40 exit)
-        cur.execute(f"SELECT time, price, high FROM scrapdata WHERE date='{d}' AND stockname = '{s}' AND time>='{d} 09:22:00' AND time<='{d} 09:45:00' ORDER BY time ASC")
+        cur.execute(f"SELECT time, price, high FROM scrapdata WHERE date='{d}' AND stockname = '{s}' AND time>='{d} 09:21:00' AND time<='{d} 09:45:00' ORDER BY time ASC")
         ticks = cur.fetchall()
     conn.close()
     
     if not ticks: return None
     
-    # 1. ENFORCE ENTRY LIQUIDITY (Must enter between 09:22 and 09:25)
+    # 1. ENFORCE ENTRY LIQUIDITY (Must enter between 09:21 and 09:25)
     sell_price = float(ticks[0]['price'] or 0)
     sell_time = str(ticks[0]['time'])
     if sell_price <= 0: return None
@@ -79,7 +79,10 @@ def audit_trade(row):
     }
 
 print("1. Loading Predictions...")
-preds = pd.read_csv(os.path.join(BASE_DIR, '0920_predictions.csv'))
+import sys
+pred_file = sys.argv[1] if len(sys.argv) > 1 else '0920_predictions.csv'
+out_name  = sys.argv[2] if len(sys.argv) > 2 else '0920_verified_pnl_sheet.csv'
+preds = pd.read_csv(os.path.join(BASE_DIR, pred_file))
 
 print(f"2. Auditing {len(preds)} Trades against MySQL Ticks (Max 3-Min Liquidity Windows)...")
 results = []
@@ -90,7 +93,7 @@ with ThreadPoolExecutor(max_workers=5) as ex:
             print(f"Audited {len(results)} trades...", flush=True)
 
 df_res = pd.DataFrame(results)
-out_file = os.path.join(BASE_DIR, '0920_verified_pnl_sheet.csv')
+out_file = os.path.join(BASE_DIR, out_name)
 df_res.to_csv(out_file, index=False)
 
 df_res['year'] = pd.to_datetime(df_res['Date']).dt.year

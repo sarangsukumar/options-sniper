@@ -81,6 +81,7 @@ def audit_trade(row):
 print("1. Loading Predictions...")
 import sys
 pred_file = sys.argv[1] if len(sys.argv) > 1 else '0942_predictions.csv'
+out_name = sys.argv[2] if len(sys.argv) > 2 else '0942_verified_pnl_sheet.csv'
 preds = pd.read_csv(os.path.join(BASE_DIR, pred_file))
 
 print(f"2. Auditing {len(preds)} Trades against MySQL Ticks (Max 3-Min Liquidity Windows)...")
@@ -90,7 +91,7 @@ with ThreadPoolExecutor(max_workers=5) as ex:
         if res: results.append(res)
 
 df_res = pd.DataFrame(results)
-out_file = os.path.join(BASE_DIR, '0942_verified_pnl_sheet.csv')
+out_file = os.path.join(BASE_DIR, out_name)
 df_res.to_csv(out_file, index=False)
 
 df_res['year'] = pd.to_datetime(df_res['Date']).dt.year
