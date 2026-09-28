@@ -116,31 +116,32 @@ See `ML_Model_Audit_Report.md` for the full detailed report.
 
 ---
 
-## 🔄 Live Production Architecture & Duplicate Order Prevention
+## 🔄 Live Production Architecture (Position-First / State-Based)
 
-The live execution system is built to be **100% resilient** and duplicate-proof across two independent components:
+The live execution system utilizes a highly resilient, institutional-grade **Position-First Architecture** via `Neo_shortsell_mis_order.py`. Instead of relying solely on a local database, the Kotak Positions API acts as the absolute source of truth.
 
-**1. ML Prediction Stage (`live_0920_scalp_pipeline.py`)**
-- Runs at `09:21 AM`.
-- Drops top 4 picks into `markets.shortsell_orders` with status `isvalid='TRUE'`.
+### 5-Layer Security Architecture for Square-Offs
+When the square-off cron jobs run at `09:36` (Profit Exit) and `09:40` (Chaser Exit), the following checks are enforced mathematically before *any* cover order is placed:
 
-**2. Kotak Execution & Lifecycle (`Neo_shortsell_mis_order.py`)**
-This single unified script handles the entire lifecycle:
-- **09:25 (SELL mode):** Places entry short limit orders at the exact live LTP. Updates DB status to `1.5`.
-- **09:26 (Fill Auditor):** `confirm_0925_fills.py` runs, pulls Kotak API, confirms fills, and records exact entry prices into the `scalp_trade_log` ledger (status `SELL_FILLED`).
-- **09:36–09:39 (SQUAREOFF mode):** Runs continuously every minute. Trailing exit logic triggers a Limit BUY cover order *only if* live profit is >0.05%. Updates ledger to `EXIT_PLACED`.
-- **09:40 (SQUAREOFF mode):** Blindly covers all remaining positions.
+1. **Database Lock Check:** Queries `scalp_trade_log`. If a trade is already marked `EXIT_PLACED` or `EXIT_DONE`, it is skipped.
+2. **Kotak Order Book Check:** Queries `client.order_report()`. If a `BUY` cover order is already `PENDING` or `OPEN`, it skips to prevent duplicates.
+3. **Kotak Positions API Check (The Ultimate Source of Truth):**
+   - Queries `client.positions()`.
+   - Calculates: `Net Short Qty = (flSellQty + cfSellQty) - (flBuyQty + cfBuyQty)`
+   - If `Net Short Qty <= 0`, the position is already flat. It strictly blocks placing any order and updates the DB to `EXIT_DONE`.
+4. **Profit Threshold Check (09:36 Only):**
+   - The exact average sell execution price is extracted directly from the Positions API.
+   - If `Profit <= 0.05%`, it holds the position. If `Profit > 0.05%`, it fires the limit cover order for the exact `Net Short Qty`.
+5. **Cancel-Fill Race Condition Check (09:40 Chaser):**
+   - If the Chaser cancels an order but Kotak responds with `"Order is already filled"`, the script immediately catches this, marks `EXIT_DONE`, and halts order placement.
 
-**3. Automated Monthly Retraining (Self-Healing)**
-- Runs on the **1st of every month** at `17:45 PM IST`.
-- Automatically rebuilds the `scalp_0920_ml_dataset.csv.gz` with the latest market ticks.
-- Retrains the LightGBM model utilizing the absolute latest market structure.
-- Command: `python3 live_0920_scalp_pipeline.py --retrain`
-
-**Robust Safeguards Enabled:**
-- 🛡️ Strict order book time-filtering to ensure `0920_SCALP` model and `0942_HYBRID` model never step on each other's trades.
-- 🛡️ API cancellation verification: will never place a new cover order without absolute Kotak confirmation that an old pending order was successfully cancelled.
-- 🛡️ Database lockfiles & status flags to guarantee zero double-shorting or double-covering.
+### Lifecycle Timeline
+- **09:21 AM:** ML Prediction (`live_0920_scalp_pipeline.py`) generates top 4 picks.
+- **09:25 AM:** Entry short limit orders placed at live LTP.
+- **09:30 AM:** Fill confirmation updates DB to `SELL_FILLED`.
+- **09:36–09:39 AM:** Trailing exit. Places limit BUY only if exact API profit > 0.05%.
+- **09:40–09:42 AM:** The Chaser loops every 20 seconds. Checks Position API, cancels open orders, places new limit orders at LTP for remaining `Net Short Qty` until net qty is `0`.
+- **Monthly (1st at 17:45):** Automated retraining updates the LightGBM model.
 
 ---
 
