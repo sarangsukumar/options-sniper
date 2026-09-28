@@ -284,12 +284,12 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         prev_dict[s].append(r)
 
     # 2. Fetch Today's Morning Cash Ticks (09:07 premarket and 09:15 to 09:19:59)
-    print(f"2. Fetching Today's Morning ({target_date_str}) Ticks (09:07 - 09:19:59)...")
+    print(f"2. Fetching Today's Morning ({target_date_str}) Ticks (09:07 - 09:23:59)...")
     with conn.cursor() as cursor:
         cursor.execute(f"""
             SELECT stockname, time, price FROM scrapdata
             WHERE date = '{target_date_str}'
-              AND TIME(time) >= '09:07:00' AND TIME(time) <= '09:19:59'
+              AND TIME(time) >= '09:07:00' AND TIME(time) <= '09:23:59'
             ORDER BY stockname, time ASC
         """)
         morn_rows = cursor.fetchall()
@@ -339,15 +339,18 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
 
         # Today's Morning Ticks
         p_0907_ticks = [float(x['price']) for x in mticks if str(x['time']).split()[-1] < '09:15:00']
-        p_0915_ticks = [float(x['price']) for x in mticks if str(x['time']).split()[-1] >= '09:15:00']
+        p_0915_to_0919_ticks = [float(x['price']) for x in mticks if '09:15:00' <= str(x['time']).split()[-1] <= '09:19:59']
 
-        if not p_0915_ticks:
+        if not p_0915_to_0919_ticks:
             continue
 
-        open_0915 = p_0915_ticks[0]
-        close_0919 = p_0915_ticks[-1]
-        high_0919 = max(p_0915_ticks)
-        low_0919 = min(p_0915_ticks)
+        open_0915 = p_0915_to_0919_ticks[0]
+        close_0919 = p_0915_to_0919_ticks[-1]
+        high_0919 = max(p_0915_to_0919_ticks)
+        low_0919 = min(p_0915_to_0919_ticks)
+        
+        
+
 
         Gap_Pct = ((open_0915 - p_close) / p_close) * 100.0
 
@@ -359,7 +362,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
 
         morn_range_pct = (high_0919 - low_0919) / (open_0915 + 1e-9)
         rejection_wick = (high_0919 - close_0919) / (high_0919 - low_0919 + 1e-9)
-        pos_arc_ratio = calc_arc_features(p_0915_ticks)
+        pos_arc_ratio = calc_arc_features(p_0915_to_0919_ticks)
 
         if close_0919 < 50:
             continue
@@ -391,6 +394,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         return
 
     df_candidates = pd.DataFrame(processed_records)
+    
     print(f"   • Qualified Universe Candidates: {len(df_candidates)} stocks")
 
     # 4. Run Model Inference
@@ -428,8 +432,8 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     lines = [
         f"⚡ <b>[09:20 SCALP ENGINE: 20-MIN SHORT SELL SELECTION]</b>",
         f"📅 <b>Date:</b> {target_date_str} | ⏱️ <b>Generated:</b> {now_str}",
-        f"🎯 <b>Holding Window:</b> 09:25 AM Entry ➔ 09:40 AM Exit (15 Mins)",
-        f"📊 <b>Model Edge:</b> 64.83% Historical Win Rate | +₹61.22L Net PnL",
+        f"🎯 <b>Holding Window:</b> 09:25 AM Entry ➔ 0.05% Trailing or 09:40 AM Exit",
+        f"📊 <b>Model Edge:</b> 75.40% Historical Win Rate | +₹123.63L Net PnL",
         "",
         "<b>🔻 TARGET 4 SHORT-SELL ORDERS:</b>"
     ]
@@ -445,7 +449,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         "",
         "⏱️ <b>Execution Rules:</b>",
         "• <b>Entry:</b> Sell at Market at 09:25:00 AM IST",
-        "• <b>Exit:</b> Unconditional Square-Off at 09:40:00 AM IST (Strict 15-min Hold)",
+        "• <b>Exit:</b> Trailing Exit from 09:36 AM, Hard Exit at 09:40 AM",
         "• <b>Risk:</b> Zero midday exposure, zero afternoon chop risk."
     ])
 
