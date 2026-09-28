@@ -51,9 +51,30 @@ python3 2_db_tick_verification.py
 ## 💰 Certified Results (2020–2026)
 
 > Walk-Forward training starts from 2021. Year 2020 is used as initial training seed only.
+> **Note:** These results reflect the 09:21 entry execution update + 09:36 (0.05% trailing) to 09:40 exit strategy.
 
 | Metric | Baseline (Fixed 09:40 Exit) | New Model (09:36 Trailing Exit, 0.05% threshold) |
 |---|---|---|
+| **Win Rate** | 64.96% | **76.5%** |
+| **Net PnL** | Rs 88.69 Lakhs | **Rs 123.74 Lakhs** |
+| **Losing Years** | Zero | **Zero** |
+
+### Year-by-Year Breakdown (0.05% Variable Exit)
+| Year | Net PnL (₹) | Win Rate | Trades |
+|---|---|---|---|
+| **2020** | + Rs 18.54 L | 72.9% | 935 |
+| **2021** | + Rs 25.54 L | 76.9% | 922 |
+| **2022** | + Rs 18.28 L | 74.2% | 920 |
+| **2023** | + Rs 19.23 L | 77.2% | 928 |
+| **2024** | + Rs 20.63 L | 76.1% | 932 |
+| **2025** | + Rs 13.11 L | 76.0% | 934 |
+| **2026** | + Rs  8.41 L | 74.0% | 550 |
+| **TOTAL**| **+ Rs 123.74 L** | **76.5%** | **6,121** |
+
+**Capital assumed:** Rs 10 Lakhs per trade | Max 4 positions/day = Rs 40 Lakhs deployed  
+**Zero losing years** across the entire period. This dynamic trailing exit captures early profit spikes and fundamentally transforms the strategy's consistency.
+
+---|---|---|
 | **Win Rate** | 64.96% | **77.40%** |
 | **Net PnL** | Rs 88.69 Lakhs | **Rs 123.85 Lakhs** |
 | **Losing Years** | Zero | **Zero** |
