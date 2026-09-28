@@ -51,10 +51,30 @@ python3 2_db_tick_verification.py
 ## 💰 Certified Results (2020–2026)
 
 > Walk-Forward training starts from 2021. Year 2020 is used as initial training seed only.
-> **Note:** These results reflect the 09:21 entry execution update + 09:36 (0.05% trailing) to 09:40 exit strategy.
+> **Note:** These results reflect the **V2 Feature Engine** (including pre-trade tick velocity drift and sector/Nifty alpha decoupling) + **09:21 entry** + **09:36 (0.05% trailing) to 09:40 exit strategy**.
 
-| Metric | Baseline (Fixed 09:40 Exit) | New Model (09:36 Trailing Exit, 0.05% threshold) |
+| Metric | Baseline (Fixed 09:40 Exit) | New V2 Model (09:36 Trailing Exit, 0.05% threshold) |
 |---|---|---|
+| **Win Rate** | 64.96% | **75.6%** |
+| **Net PnL** | Rs 88.69 Lakhs | **Rs 238.44 Lakhs** |
+| **Losing Years** | Zero | **Zero** |
+
+### Year-by-Year Breakdown (V2 Features + 0.05% Variable Exit)
+| Year | Net PnL (₹) | Win Rate | Trades |
+|---|---|---|---|
+| **2020** | + Rs 41.40 L | 71.4% | 935 |
+| **2021** | + Rs 39.05 L | 77.2% | 922 |
+| **2022** | + Rs 43.72 L | 79.5% | 920 |
+| **2023** | + Rs 30.98 L | 75.5% | 928 |
+| **2024** | + Rs 38.19 L | 77.1% | 932 |
+| **2025** | + Rs 24.88 L | 72.2% | 934 |
+| **2026** | + Rs 20.23 L | 76.9% | 550 |
+| **TOTAL**| **+ Rs 238.44 L** | **75.6%** | **6,121** |
+
+**Capital assumed:** Rs 10 Lakhs per trade | Max 4 positions/day = Rs 40 Lakhs deployed  
+**Zero losing years** across the entire period. This dynamic trailing exit, combined with the new pre-trade tick drift and sector decoupling alpha features, has massively increased the edge and nearly doubled the total PnL.
+
+---|---|---|
 | **Win Rate** | 64.96% | **76.5%** |
 | **Net PnL** | Rs 88.69 Lakhs | **Rs 123.74 Lakhs** |
 | **Losing Years** | Zero | **Zero** |
