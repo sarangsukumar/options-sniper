@@ -65,3 +65,5 @@ python3 1_build_features_and_train.py
 # Verify PnL tick-by-tick against MySQL
 python3 2_db_tick_verification.py
 ```
+
+> **Execution Clarification (09:25 Entry):** While the prediction pipeline (`live_0920_scalp_pipeline.py`) logs the 09:19 close price into the database as a placeholder limit price, the actual live execution script (`Neo_shortsell_mis_order.py`) dynamically overrides this by fetching the live LTP from the broker exactly at 09:25 AM. The order is then placed as a limit order pegged to that true 09:25 open price. This guarantees strict compliance with the simulated 09:25 entry rules.
