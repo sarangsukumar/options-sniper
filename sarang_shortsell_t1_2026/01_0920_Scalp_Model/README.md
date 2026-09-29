@@ -12,8 +12,8 @@ This repository contains the **complete, self-contained** LightGBM model, traini
 ## ⚙️ Strategy & Execution Mechanics
 
 * **Entry Time:** `09:25:00 IST` (Market order pegged to **09:25 OPEN** price).
-* **Trailing Profit Exit:** Continuously checked starting at `09:36:00 IST` for a **0.05% profit target**.
-* **Hard Square-Off:** Unconditional exit at `09:40:00 IST` (**09:40 OPEN** price) if trailing target is not met.
+* **Trailing Profit Exit:** Checked at the exact minute opens of `09:36`, `09:37`, `09:38`, and `09:39` for a **>0.05% profit target**.
+* **Hard Square-Off:** Unconditional limit-chaser exit at `09:40:00 IST` (**09:40 OPEN** price) if trailing target is not met.
 * **Stop Loss:** Strict **3.0% Tick-by-Tick Stop Loss** evaluated on candle highs.
 * **Friction & Charges:** **0.07%** per round-trip trade.
 
@@ -22,9 +22,9 @@ This repository contains the **complete, self-contained** LightGBM model, traini
 ## 💰 Certified Performance Summary (2020 – 2026)
 
 * **Total Trades:** **6,119**
-* **Overall Win Rate:** **75.40%** (Unleveraged: **77.30%**)
-* **Net PnL (Unleveraged @ ₹5L per stock):** **+₹60.05 Lakhs**
-* **Net PnL (2x Kotak MIS Margin @ ₹10L per stock / ₹8L Total Capital):** **+₹123.63 Lakhs (₹1.236 Crores)** 💰
+* **Overall Win Rate:** **77.64%** (09:25 Entry + Trailing Open Exit Logic)
+* **Net PnL (Unleveraged @ ₹5L per stock):** **+₹65.03 Lakhs**
+* **Net PnL (2x Kotak MIS Margin @ ₹10L per stock / ₹8L Total Capital):** **+₹130.07 Lakhs (₹1.30 Crores)** 💰
 
 ---
 
@@ -32,14 +32,14 @@ This repository contains the **complete, self-contained** LightGBM model, traini
 
 | Year | Total Trades | Winning Trades | Win Rate (%) | 1x Cash PnL (₹5L/Stock) | **2x MIS Margin PnL (₹10L/Stock)** |
 | :---: | :---: | :---: | :---: | :---: | :---: |
-| **2020** | 935 | 697 | **74.55%** | +₹9.04 L | **+₹18.54 L** |
-| **2021** | 922 | 729 | **79.07%** | +₹12.67 L | **+₹25.54 L** |
-| **2022** | 919 | 702 | **76.39%** | +₹8.82 L | **+₹18.28 L** |
-| **2023** | 928 | 733 | **78.99%** | +₹9.39 L | **+₹19.23 L** |
-| **2024** | 930 | 732 | **78.71%** | +₹9.95 L | **+₹20.63 L** |
-| **2025** | 934 | 720 | **77.09%** | +₹6.26 L | **+₹13.11 L** |
-| **2026** (YTD) | 550 | 416 | **75.64%** | +₹3.92 L | **+₹8.41 L** |
-| **TOTAL** | **6,119** | **4,729** | **75.40%** 🏆 | **+₹60.05 L** | **+₹123.63 L (₹1.236 Cr)** |
+| **2020** | 935 | 688 | **73.58%** | +₹10.11 L | **+₹20.21 L** |
+| **2021** | 922 | 739 | **80.15%** | +₹12.53 L | **+₹25.05 L** |
+| **2022** | 919 | 705 | **76.71%** | +₹10.65 L | **+₹21.31 L** |
+| **2023** | 928 | 734 | **79.09%** | +₹9.49 L | **+₹18.98 L** |
+| **2024** | 931 | 759 | **81.53%** | +₹11.12 L | **+₹22.24 L** |
+| **2025** | 934 | 703 | **75.27%** | +₹6.34 L | **+₹12.69 L** |
+| **2026** (YTD) | 550 | 423 | **76.91%** | +₹4.79 L | **+₹9.59 L** |
+| **TOTAL** | **6,119** | **4,751** | **77.64%** 🏆 | **+₹65.03 L** | **+₹130.07 L (₹1.30 Cr)** |
 
 ---
 
