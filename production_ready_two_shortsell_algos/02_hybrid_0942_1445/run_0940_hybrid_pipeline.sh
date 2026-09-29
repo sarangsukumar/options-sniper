@@ -9,6 +9,7 @@ set -e
 export HOME="/home/ubuntu"
 export PYTHONPATH="/home/ubuntu/.local/lib/python3.10/site-packages:$PYTHONPATH"
 export PATH="/home/ubuntu/.nvm/versions/node/v18.20.8/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export TZ="Asia/Kolkata"
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$DIR"
@@ -64,8 +65,14 @@ else
     exit 1
 fi
 
-# Step 3: Immediately Trigger Kotak Order Placer
-echo "[Step 3/3] Triggering Kotak Order Execution Script..." >> "$LOG_FILE"
+# Wait until exactly 09:42:00 before placing orders
+echo "⏳ Waiting until exactly 09:42:00 IST to place orders..." >> "$LOG_FILE"
+while [[ $(date +%H:%M:%S) < "09:42:00" ]]; do
+    sleep 0.2
+done
+
+# Step 3: Trigger Kotak Order Placer
+echo "[Step 3/3] Triggering Kotak Order Execution Script at $(date +%H:%M:%S)..." >> "$LOG_FILE"
 cd /home/ubuntu/KotakCodes1
 if python3 Neo_shortsell_mis_order.py 0942_HYBRID >> "$LOG_FILE" 2>&1; then
     echo "✔ Step 3 (Order Placement) completed successfully." >> "$LOG_FILE"
