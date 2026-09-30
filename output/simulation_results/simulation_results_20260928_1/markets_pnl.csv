@@ -1,0 +1,2 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-09-25,SIEMENS,3863.2,3816.7,175,200.0,-8337.5,Fallback/Standard Limit Fill,Day 1,

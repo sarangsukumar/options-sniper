@@ -9,13 +9,15 @@ This repository contains the **complete, self-contained** LightGBM model, traini
 
 ---
 
-## ⚙️ Strategy & Execution Mechanics
+## ⚙️ Strategy & Execution Mechanics (CRITICAL EXACT LOGIC)
 
-* **Entry Time:** `09:25:00 IST` (Market order pegged to **09:25 OPEN** price).
-* **Trailing Profit Exit:** Checked at the exact minute opens of `09:36`, `09:37`, `09:38`, and `09:39` for a **>0.05% profit target**.
-* **Hard Square-Off:** Unconditional limit-chaser exit at `09:40:00 IST` (**09:40 OPEN** price) if trailing target is not met.
-* **Stop Loss:** Strict **3.0% Tick-by-Tick Stop Loss** evaluated on candle highs.
-* **Friction & Charges:** **0.07%** per round-trip trade.
+To avoid any confusion when rebuilding and verifying, the verification engine exactly enforces the following execution timing:
+
+* **Entry Time:** `09:25:00 IST` exactly. (The market order is strictly placed at the 09:25 OPEN price. No lookahead or early entry is permitted).
+* **Trailing Profit Exit (0.05%):** Checked at the exact minute opens of `09:36`, `09:37`, `09:38`, and `09:39`. If the unrealised profit is >0.05% at any of these exact minute opens, the position is covered immediately at that price.
+* **Hard Square-Off:** Unconditional limit-chaser exit at `09:40:00 IST` (**09:40 OPEN** price) if neither trailing target nor stop loss is met.
+* **Stop Loss:** Strict **3.0% Tick-by-Tick Stop Loss** evaluated on candle highs during the entire hold period.
+* **Friction & Charges:** **0.07%** per round-trip trade (Slippage, Brokerage, STT, Exchange, SEBI, GST).
 
 ---
 

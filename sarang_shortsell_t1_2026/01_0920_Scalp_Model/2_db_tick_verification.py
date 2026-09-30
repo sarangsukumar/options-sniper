@@ -3,6 +3,18 @@ import pymysql
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
+"""
+====================================================================
+TICK-BY-TICK VERIFICATION ENGINE (09:20 SCALP MODEL)
+====================================================================
+This script verifies the exact PnL by querying tick data and applying:
+1. ENTRY: Exactly at the 09:25:00 open price (simulating limit entry).
+2. STOP LOSS: Strict 3% tick-by-tick stop loss during the hold.
+3. TAKE PROFIT: Evaluates trailing profit (>0.05%) precisely at the minute opens of 09:36, 09:37, 09:38, and 09:39.
+4. HARD SQUARE-OFF: Closes position unconditionally at 09:40:00.
+====================================================================
+"""
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_taxes(qty, sell_price, buy_price):
@@ -20,14 +32,14 @@ def audit_trade(row):
     
     conn = pymysql.connect(host='localhost', user='root', password='root', database='markets', cursorclass=pymysql.cursors.DictCursor)
     with conn.cursor() as cur:
-        # Pull ticks from 09:22 to 09:45 (giving 5 mins buffer for the 09:40 exit)
-        cur.execute(f"SELECT time, price, high FROM scrapdata WHERE date='{d}' AND stockname = '{s}' AND time>='{d} 09:21:00' AND time<='{d} 09:45:00' ORDER BY time ASC")
+        # Pull ticks from 09:25 to 09:45 (giving 5 mins buffer for the 09:40 exit)
+        cur.execute(f"SELECT time, price, high FROM scrapdata WHERE date='{d}' AND stockname = '{s}' AND time>='{d} 09:25:00' AND time<='{d} 09:45:00' ORDER BY time ASC")
         ticks = cur.fetchall()
     conn.close()
     
     if not ticks: return None
     
-    # 1. ENFORCE ENTRY LIQUIDITY (Must enter between 09:21 and 09:25)
+    # 1. ENFORCE ENTRY LIQUIDITY (Must enter between 09:25 and 09:25:59)
     sell_price = float(ticks[0]['price'] or 0)
     sell_time = str(ticks[0]['time'])
     if sell_price <= 0: return None
@@ -39,9 +51,13 @@ def audit_trade(row):
     # 2. ENFORCE EXIT LIQUIDITY
     buy_price = None
     buy_time = None
+    tp_minutes = [f"{d} 09:36", f"{d} 09:37", f"{d} 09:38", f"{d} 09:39"]
+    tp_checked = set()
+    
     for t in ticks:
         t_time = str(t['time'])
         h = float(t['high'] or t['price'] or 0)
+        p = float(t['price'] or 0)
         
         # Stop loss hit
         if h >= sl_price:
@@ -49,9 +65,18 @@ def audit_trade(row):
             buy_time = t_time
             break
             
+        # Trailing profit check at specific minute opens
+        minute_prefix = t_time[:16] # e.g., "YYYY-MM-DD 09:36"
+        if minute_prefix in tp_minutes and minute_prefix not in tp_checked:
+            tp_checked.add(minute_prefix)
+            if p < sell_price * 0.9995: # >0.05% profit for short sell
+                buy_price = p
+                buy_time = t_time
+                break
+                
         # Time exit hit
         if t_time >= f"{d} 09:40:00":
-            buy_price = float(t['price'] or 0)
+            buy_price = p
             buy_time = t_time
             break
             

@@ -3,6 +3,18 @@ import pymysql
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
+"""
+====================================================================
+TICK-BY-TICK VERIFICATION ENGINE (09:42 HYBRID MODEL)
+====================================================================
+This script verifies the exact PnL by querying tick data and applying:
+1. ENTRY: Exactly at the 09:42:00 open price (simulating limit entry pegged to 09:42 open).
+2. STOP LOSS: Strict 3% tick-by-tick stop loss during the hold (entry_price * 1.03).
+3. HARD SQUARE-OFF: Closes position unconditionally at 14:45:00.
+(There is NO trailing take-profit rule for this model).
+====================================================================
+"""
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_taxes(qty, sell_price, buy_price):

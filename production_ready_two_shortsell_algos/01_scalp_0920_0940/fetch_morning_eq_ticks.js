@@ -16,7 +16,8 @@ const path = require('path');
 const mysql = require('mysql');
 
 // ── CONFIGURATION ────────────────────────────────────────────────────────────
-const MASTER_CSV = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/masterfile.csv';
+const DAILY_EQ_MASTER = '/home/ubuntu/KotakCodes1/masterfile/ICICImaster_EQ.csv';
+const MASTER_CSV = fs.existsSync(DAILY_EQ_MASTER) ? DAILY_EQ_MASTER : '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/masterfile.csv';
 const TABLENAME = "scrapdata";
 
 // Account Configurations
@@ -153,25 +154,57 @@ async function switchAccount(accountName) {
     console.log(`[Account Switch] Credentials updated to: ${accountName}`);
 }
 
-function readScripCodes() {
-    return new Promise((resolve) => {
-        const scripCodes = {};
-        if (!fs.existsSync(MASTER_CSV)) {
-            console.error(`[Error] masterfile.csv not found at ${MASTER_CSV}`);
-            resolve(scripCodes);
-            return;
-        }
-        fs.createReadStream(MASTER_CSV)
-            .pipe(csv())
-            .on('data', (row) => {
-                if (row.stockCodes && row.scripcode) {
-                    scripCodes[row.stockCodes.trim().toUpperCase()] = row.scripcode.trim();
-                }
-            })
-            .on('end', () => {
-                resolve(scripCodes);
-            });
-    });
+async function readScripCodes() {
+    const scripCodes = {};
+    const fallbackPath = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/masterfile.csv';
+    const dailyPath = '/home/ubuntu/KotakCodes1/masterfile/ICICImaster_EQ.csv';
+    const configDailyPath = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/ICICImaster_EQ.csv';
+
+    // 1. Read fallback masterfile if available
+    if (fs.existsSync(fallbackPath)) {
+        await new Promise((resolve) => {
+            fs.createReadStream(fallbackPath)
+                .pipe(csv())
+                .on('data', (row) => {
+                    const stock = (row.stockcodes || row.stockCodes || row[7] || row[6] || '').trim().toUpperCase();
+                    const scrip = (row.scripcode || row.ShortName || row[2] || '').trim();
+                    if (stock && scrip && stock !== 'STOCKCODES') {
+                        scripCodes[stock] = scrip;
+                    }
+                })
+                .on('end', resolve)
+                .on('error', resolve);
+        });
+    }
+
+    // 2. Overlay daily updated ICICImaster_EQ.csv (from KotakCodes1 or config backup)
+    const activeDaily = fs.existsSync(dailyPath) ? dailyPath : (fs.existsSync(configDailyPath) ? configDailyPath : null);
+    if (activeDaily) {
+        await new Promise((resolve) => {
+            fs.createReadStream(activeDaily)
+                .pipe(csv())
+                .on('data', (row) => {
+                    const stock = (row.stockcodes || row.stockCodes || row[7] || row[6] || '').trim().toUpperCase();
+                    const scrip = (row.scripcode || row.ShortName || row[2] || '').trim();
+                    if (stock && scrip && stock !== 'STOCKCODES') {
+                        scripCodes[stock] = scrip;
+                    }
+                })
+                .on('end', resolve)
+                .on('error', resolve);
+        });
+    }
+
+    // 3. Ticker Aliases (e.g. Tata Motors demerger TMPV, etc.)
+    if (scripCodes['TMPV'] && !scripCodes['TATAMOTORS']) scripCodes['TATAMOTORS'] = scripCodes['TMPV'];
+    if (scripCodes['TATMOT'] && !scripCodes['TATAMOTORS']) scripCodes['TATAMOTORS'] = 'TATMOT';
+    if (scripCodes['TATMOT'] && !scripCodes['TMPV']) scripCodes['TMPV'] = 'TATMOT';
+    if (scripCodes['SAMMAANCAP'] && !scripCodes['IBULHSGFIN']) scripCodes['IBULHSGFIN'] = scripCodes['SAMMAANCAP'];
+    if (scripCodes['LTIMINDTREE'] && !scripCodes['LTIM']) scripCodes['LTIM'] = scripCodes['LTIMINDTREE'];
+    if (scripCodes['GMRP&UI'] && !scripCodes['GMRINFRA']) scripCodes['GMRINFRA'] = scripCodes['GMRP&UI'];
+
+    console.log(`[Master Scrip Mapper] Successfully loaded ${Object.keys(scripCodes).length} EQ security mappings.`);
+    return scripCodes;
 }
 
 function withTimeout(promise, ms) {
@@ -323,6 +356,27 @@ async function runDownload() {
         console.log(`[ARG] No valid target date provided. Using today: ${todayStr}`);
     }
     const stockList  = VALIDSTOCKNAMES.split(',').map(s => s.trim()).filter(Boolean);
+
+    // Dynamically include all active F&O contracts from daily masterfile so no stock is ever missed
+    const dailyFutPath = '/home/ubuntu/KotakCodes1/masterfile/ICICImaster.csv';
+    const configFutPath = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/ICICImaster.csv';
+    const futFile = fs.existsSync(dailyFutPath) ? dailyFutPath : (fs.existsSync(configFutPath) ? configFutPath : null);
+    if (futFile) {
+        try {
+            const futContent = fs.readFileSync(futFile, 'utf8');
+            futContent.split('\n').forEach(line => {
+                const parts = line.split(',');
+                if (parts.length >= 8) {
+                    const sym = parts[parts.length - 1].trim().toUpperCase();
+                    if (sym && sym !== 'STOCKCODES' && !stockList.includes(sym)) {
+                        stockList.push(sym);
+                    }
+                }
+            });
+        } catch (e) {}
+    }
+    if (!stockList.includes('TMPV')) stockList.push('TMPV');
+
     const scripCodes = await readScripCodes();
 
     console.log(`\n${'='.repeat(70)}`);

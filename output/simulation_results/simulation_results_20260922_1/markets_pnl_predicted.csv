@@ -1,0 +1,2 @@
+simulationdate,stockname,buy_price,sell_price,quantity,commission_paid,pnl,sell_exec_type,completion_day,expiry_capping_details
+2026-09-21,PAGEIND,36140.0,36695.0,20,200.0,10900.0,Custom Limit Fill,Day 1,
