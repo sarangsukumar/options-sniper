@@ -253,6 +253,30 @@ def load_historical_dataset_with_macro(dataset_path):
     features['nifty_vs_nikkei_gap'] = features['nifty_gap'] - features['nikkei_gap']
     global_macro = features[['date_str', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap']]
     df_hist = pd.read_csv(dataset_path, low_memory=False)
+    
+    # =========================================================================
+    # CRITICAL FIX: PURGE F1 DATA FROM HISTORICAL DATASET
+    # The raw dataset mixed F1 prices into `price_0907_unified`. We must recalculate 
+    # the premarket features using ONLY pure EQ (`price_0907_eq`) and `Gap_Pct`.
+    # =========================================================================
+    if 'price_0907_eq' in df_hist.columns and 'prev_close' in df_hist.columns:
+        df_hist['price_0907_eq'] = pd.to_numeric(df_hist['price_0907_eq'], errors='coerce')
+        df_hist['prev_close'] = pd.to_numeric(df_hist['prev_close'], errors='coerce')
+        df_hist['morning_close'] = pd.to_numeric(df_hist['morning_close'], errors='coerce')
+        df_hist['Gap_Pct'] = pd.to_numeric(df_hist.get('Gap_Pct', 0), errors='coerce').fillna(0.0)
+
+        df_hist['gap_0907_pct'] = np.where(
+            df_hist['price_0907_eq'].notna() & df_hist['prev_close'].notna() & (df_hist['prev_close'] > 0),
+            ((df_hist['price_0907_eq'] - df_hist['prev_close']) / df_hist['prev_close']) * 100.0,
+            df_hist['Gap_Pct']
+        )
+        df_hist['gap_fade_0907_to_940_pct'] = np.where(
+            df_hist['price_0907_eq'].notna() & (df_hist['price_0907_eq'] > 0) & df_hist['morning_close'].notna(),
+            ((df_hist['morning_close'] - df_hist['price_0907_eq']) / df_hist['price_0907_eq']) * 100.0,
+            0.0
+        )
+    # =========================================================================
+
     date_col = 'short_date' if 'short_date' in df_hist.columns else 'buy_day'
     df_hist = df_hist.drop_duplicates(subset=[date_col, 'clean_stock'])
     if 'short_pct_return' in df_hist.columns:
