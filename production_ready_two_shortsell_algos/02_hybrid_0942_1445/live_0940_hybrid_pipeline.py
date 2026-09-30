@@ -366,7 +366,7 @@ def train_and_predict_single(df_today):
         _conn.close()
         nifty_prev_close = float(_row[0]) if _row and _row[0] else 0.0
         nifty_940_price  = float(_row[1]) if _row and _row[1] else 0.0
-        nifty_pct = ((nifty_940_price - nifty_prev_close) / nifty_prev_close * 100.0) if nifty_prev_close > 0 else 0.0
+        nifty_pct = ((nifty_940_price - nifty_prev_close) / nifty_prev_close * 100.0) if (nifty_prev_close > 0 and nifty_940_price > 0) else 0.0
         print(f"\n   📊 FILTER INPUTS:")
         print(f"      Nifty Prev Close : {nifty_prev_close:.2f}")
         print(f"      Nifty @ 09:40    : {nifty_940_price:.2f}")

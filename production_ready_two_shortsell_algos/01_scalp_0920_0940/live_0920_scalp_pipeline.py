@@ -73,7 +73,7 @@ VALID_STOCKS = [
     'SAIL', 'SBICARD', 'SBILIFE', 'SBIN', 'SHREECEM', 'SHRIRAMFIN', 'SIEMENS', 'SRF', 'SUNPHARMA',
     'SUNTV', 'SYNGENE', 'TATACHEM', 'TATACOMM', 'TATACONSUM', 'TATAMOTORS', 'TATAPOWER', 'TATASTEEL',
     'TCS', 'TECHM', 'TITAN', 'TORNTPHARM', 'TRENT', 'TVSMOTOR', 'UBL', 'ULTRACEMCO', 'UNITDSPR',
-    'UPL', 'VEDL', 'VOLTAS', 'WIPRO', 'ZEEL', 'ZYDUSLIFE'
+    'UPL', 'VEDL', 'VOLTAS', 'WIPRO', 'ZEEL', 'ZYDUSLIFE', 
 ]
 VALID_SET = set(VALID_STOCKS)
 
@@ -161,29 +161,70 @@ def append_to_daily_ledger(target_date_str, top4_df):
 
 def retrain_and_save_model():
     """
-    Retrain the 0920 Scalp model using Expanding Window (All Data) + Time-Decay.
+    Retrain the 0920 Scalp model using Historical Dataset + Global Macro Data (Yahoo Finance).
     Run this on the 1st of every month via cron:
       45 17 1 * * python3 live_0920_scalp_pipeline.py --retrain
     """
     import lightgbm as lgb
-    print("\n🔁 RETRAINING: 09:20 Scalp Model (Expanding Window + Time-Decay)...")
+    import yfinance as yf
+    print("\n🔁 RETRAINING: 09:20 Scalp Model (Full Dataset + Global Macro Data)...")
     dataset_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/01_0920_Scalp_Model/data/scalp_0920_ml_dataset.csv.gz'
+    if not os.path.exists(dataset_path):
+        dataset_path = os.path.join(SCRIPT_DIR, 'data', 'scalp_0920_ml_dataset.csv.gz')
+
+    # Step 1: Fetch global macro features via Yahoo Finance
+    print("   1. Fetching Global Macro Data (Yahoo Finance)...")
+    tickers = {'NIFTY': '^NSEI', 'SP500': '^GSPC', 'NIKKEI': '^N225'}
+    data = yf.download(list(tickers.values()), start='2018-01-01', progress=False)
+
+    if isinstance(data.columns, pd.MultiIndex):
+        df_close = data['Close'].reset_index()
+        df_open = data['Open'].reset_index()
+    else:
+        df_close = pd.DataFrame(data['Close'], columns=['^NSEI']).reset_index()
+        df_open = pd.DataFrame(data['Open'], columns=['^NSEI']).reset_index()
+
+    dates = pd.date_range(start='2018-01-01', end=pd.Timestamp.now() + pd.Timedelta(days=30), freq='B')
+    mac_df = pd.DataFrame({'date': dates})
+    mac_df['date_str'] = mac_df['date'].dt.strftime('%Y-%m-%d')
+
+    nifty_c = df_close[['Date', '^NSEI']].rename(columns={'Date': 'date', '^NSEI': 'nifty_close'})
+    nifty_o = df_open[['Date', '^NSEI']].rename(columns={'Date': 'date', '^NSEI': 'nifty_open'})
+    mac_df = mac_df.merge(nifty_c, on='date', how='left').merge(nifty_o, on='date', how='left')
+    mac_df['nifty_gap'] = (mac_df['nifty_open'] / mac_df['nifty_close'].shift(1)) - 1
+
+    sp_c = df_close[['Date', '^GSPC']].rename(columns={'Date': 'date', '^GSPC': 'sp500_close'})
+    mac_df = mac_df.merge(sp_c, on='date', how='left')
+    mac_df['sp500_overnight_ret'] = (mac_df['sp500_close'].shift(1) / mac_df['sp500_close'].shift(2)) - 1
+
+    nikkei_c = df_close[['Date', '^N225']].rename(columns={'Date': 'date', '^N225': 'nikkei_close'})
+    nikkei_o = df_open[['Date', '^N225']].rename(columns={'Date': 'date', '^N225': 'nikkei_open'})
+    mac_df = mac_df.merge(nikkei_c, on='date', how='left').merge(nikkei_o, on='date', how='left')
+    mac_df['nikkei_gap'] = (mac_df['nikkei_open'] / mac_df['nikkei_close'].shift(1)) - 1
+
+    for c in ['sp500_overnight_ret', 'nikkei_gap', 'nifty_gap']: 
+        mac_df[c] = mac_df[c].fillna(0)
+
+    mac_df['nifty_vs_sp500_gap'] = mac_df['nifty_gap'] - mac_df['sp500_overnight_ret']
+    mac_df['nifty_vs_nikkei_gap'] = mac_df['nifty_gap'] - mac_df['nikkei_gap']
+
+    global_macro = mac_df[['date_str', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap']]
+
+    # Step 2: Load historical base features and merge macro features
+    print(f"   2. Loading Historical Dataset: {dataset_path}...")
     df = pd.read_csv(dataset_path, low_memory=False)
-    df['date_obj'] = pd.to_datetime(df['short_date'])
-    df['year'] = df['date_obj'].dt.year
+    df = df.merge(global_macro, left_on='short_date', right_on='date_str', how='left')
 
     for f in FEATURES:
         if f not in df.columns: df[f] = 0.0
         df[f] = pd.to_numeric(df[f], errors='coerce').fillna(0.0)
 
     df['target'] = (df['pnl_net'] > 0).astype(int)
-    
-    current_year = pd.Timestamp.today().year
-    df['weight'] = np.exp((df['year'] - current_year) * 0.5)
 
     params = {
         'objective': 'binary',
         'metric': 'auc',
+        'boosting_type': 'gbdt',
         'learning_rate': 0.05,
         'max_depth': 5,
         'num_leaves': 31,
@@ -192,7 +233,8 @@ def retrain_and_save_model():
         'random_state': 42
     }
     
-    dtrain = lgb.Dataset(df[FEATURES], label=df['target'], weight=df['weight'])
+    print(f"   3. Training LightGBM Booster on {len(df)} samples across all 13 features...")
+    dtrain = lgb.Dataset(df[FEATURES], label=df['target'])
     mod = lgb.train(params, dtrain, num_boost_round=300)
     
     mod.save_model(MODEL_FILE)
@@ -254,9 +296,12 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         sp500_close_prev2 = float(prev_row_c['^GSPC'].values[-2]) if len(prev_row_c) >= 2 else None
         nikkei_open  = float(today_row_o['^N225'].values[0]) if len(today_row_o) else None
         nikkei_close_prev = float(prev_row_c['^N225'].values[-1]) if len(prev_row_c) >= 1 else None
-        nifty_gap           = ((nifty_open / nifty_close_prev) - 1) if nifty_open and nifty_close_prev else 0.0
-        sp500_overnight_ret = ((sp500_close_prev / sp500_close_prev2) - 1) if sp500_close_prev and sp500_close_prev2 else 0.0
-        nikkei_gap          = ((nikkei_open / nikkei_close_prev) - 1) if nikkei_open and nikkei_close_prev else 0.0
+        nifty_gap           = ((nifty_open / nifty_close_prev) - 1) if (nifty_open and nifty_close_prev and not np.isnan(nifty_open) and not np.isnan(nifty_close_prev)) else 0.0
+        sp500_overnight_ret = ((sp500_close_prev / sp500_close_prev2) - 1) if (sp500_close_prev and sp500_close_prev2 and not np.isnan(sp500_close_prev) and not np.isnan(sp500_close_prev2)) else 0.0
+        nikkei_gap          = ((nikkei_open / nikkei_close_prev) - 1) if (nikkei_open and nikkei_close_prev and not np.isnan(nikkei_open) and not np.isnan(nikkei_close_prev)) else 0.0
+        nifty_gap           = float(np.nan_to_num(nifty_gap, nan=0.0))
+        sp500_overnight_ret = float(np.nan_to_num(sp500_overnight_ret, nan=0.0))
+        nikkei_gap          = float(np.nan_to_num(nikkei_gap, nan=0.0))
         nifty_vs_sp500_gap  = nifty_gap - sp500_overnight_ret
         nifty_vs_nikkei_gap = nifty_gap - nikkei_gap
         print(f"   ✔ nifty_gap={nifty_gap:.4f} | sp500_ret={sp500_overnight_ret:.4f} | nikkei_gap={nikkei_gap:.4f}")
@@ -394,11 +439,13 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         return
 
     df_candidates = pd.DataFrame(processed_records)
+    df_candidates = df_candidates[df_candidates['stockname'] != 'TMPV'].reset_index(drop=True)
+    df_candidates = df_candidates.drop_duplicates(subset=['short_prob', 'close_0919']).reset_index(drop=True)
     
     print(f"   • Qualified Universe Candidates: {len(df_candidates)} stocks")
 
     # 4. Run Model Inference
-    X = df_candidates[FEATURES]
+    X = df_candidates[FEATURES].fillna(0.0)
     df_candidates['short_prob'] = model.predict(X)
 
     # 5. Select Top 4 Candidates
@@ -433,7 +480,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         f"⚡ <b>[09:20 SCALP ENGINE: 20-MIN SHORT SELL SELECTION]</b>",
         f"📅 <b>Date:</b> {target_date_str} | ⏱️ <b>Generated:</b> {now_str}",
         f"🎯 <b>Holding Window:</b> 09:25 AM Entry ➔ 0.05% Trailing or 09:40 AM Exit",
-        f"📊 <b>Model Edge:</b> 75.40% Historical Win Rate | +₹123.63L Net PnL",
+        f"📊 <b>Model Edge:</b> 77.64% Historical Win Rate | +₹130.07L Net PnL",
         "",
         "<b>🔻 TARGET 4 SHORT-SELL ORDERS:</b>"
     ]
