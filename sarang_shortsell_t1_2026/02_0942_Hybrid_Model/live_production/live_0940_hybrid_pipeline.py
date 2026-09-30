@@ -197,7 +197,12 @@ def compute_features(df_prev_ticks, df_0907, df_morn_ticks, target_date_str, cl_
             p_prev_close = pm.get('prev_close', p_open)
             gap_0907_pct = ((p_0907 - p_prev_close) / p_prev_close * 100.0) if p_prev_close > 0 else 0.0
             gap_pct = ((p_open - p_prev_close) / p_prev_close * 100.0) if p_prev_close > 0 else 0.0
-            gap_fade = ((p_940 - p_0907) / p_0907 * 100.0) if p_0907 > 0 else 0.0
+            
+            # Match Historical Backtest Exactly: If pure 09:07 pre-market is missing, gap_fade is 0.0
+            if stock in map_0907 and p_0907 > 0:
+                gap_fade = ((p_940 - p_0907) / p_0907 * 100.0)
+            else:
+                gap_fade = 0.0
             morn_range = ((p_high - p_low) / p_open * 100.0) if p_open > 0 else 0.0
             rejection = ((p_high - p_940) / p_open * 100.0) if p_open > 0 else 0.0
 
