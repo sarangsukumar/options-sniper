@@ -119,7 +119,7 @@ def fetch_live_data(target_date_str, prev_date_str):
         q_prev = f"""
         SELECT TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) as clean_stock,
                time, CAST(price AS DECIMAL(10,2)) as price
-        FROM scrapdata_F1
+        FROM scrapdata
         WHERE date = '{prev_date_str}' AND isvalid = 'TRUE'
           AND stockname NOT IN ('NIFTY 50', 'NIFTY BANK', 'NIFTY', 'BANKNIFTY', 'FINNIFTY')
         ORDER BY time ASC
@@ -130,25 +130,16 @@ def fetch_live_data(target_date_str, prev_date_str):
         q_0907 = f"""
         SELECT TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) as clean_stock,
                CAST(price AS DECIMAL(10,2)) as price_0907
-        FROM scrapdata_F1
-        WHERE date = '{target_date_str}' AND time = '{target_date_str} 09:07:00' AND isvalid = 'TRUE'
+        FROM scrapdata
+        WHERE date = '{target_date_str}' AND TIME(time) < '09:15:00' AND isvalid = 'TRUE'
         """
         cursor.execute(q_0907)
         df_0907 = pd.DataFrame(cursor.fetchall())
-        if len(df_0907) == 0:
-            q_0907_eq = f"""
-            SELECT TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) as clean_stock,
-                   CAST(price AS DECIMAL(10,2)) as price_0907
-            FROM scrapdata
-            WHERE date = '{target_date_str}' AND time = '{target_date_str} 09:07:00' AND isvalid = 'TRUE'
-            """
-            cursor.execute(q_0907_eq)
-            df_0907 = pd.DataFrame(cursor.fetchall())
 
         q_morn = f"""
         SELECT TRIM(BOTH '\"' FROM TRIM(BOTH \"'\" FROM TRIM(stockname))) as clean_stock,
                time, CAST(price AS DECIMAL(10,2)) as price
-        FROM scrapdata_F1
+        FROM scrapdata
         WHERE date = '{target_date_str}' AND TIME(time) >= '09:15:00' AND TIME(time) <= '09:40:00'
           AND isvalid = 'TRUE'
           AND stockname NOT IN ('NIFTY 50', 'NIFTY BANK', 'NIFTY', 'BANKNIFTY', 'FINNIFTY')
@@ -357,6 +348,12 @@ def train_and_predict_single(df_today):
         import pymysql
         _conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
         _cur = _conn.cursor()
+        
+        # =========================================================================
+        # CRITICAL NOTE: We explicitly use `scrapdata_F1` (Futures) here ONLY for 
+        # the Nifty 50 Index. This is because Nifty 50 Cash (EQ) does not print 
+        # reliable pre-market/early ticks. All individual stocks must use `scrapdata` (EQ).
+        # =========================================================================
         _cur.execute(f"""
             SELECT
               (SELECT price FROM scrapdata_F1 WHERE stockname='NIFTY 50' AND DATE(time) < '{today_str}' ORDER BY time DESC LIMIT 1) AS nifty_prev_close,
@@ -366,7 +363,7 @@ def train_and_predict_single(df_today):
         _conn.close()
         nifty_prev_close = float(_row[0]) if _row and _row[0] else 0.0
         nifty_940_price  = float(_row[1]) if _row and _row[1] else 0.0
-        nifty_pct = ((nifty_940_price - nifty_prev_close) / nifty_prev_close * 100.0) if nifty_prev_close > 0 else 0.0
+        nifty_pct = ((nifty_940_price - nifty_prev_close) / nifty_prev_close * 100.0) if (nifty_prev_close > 0 and nifty_940_price > 0) else 0.0
         print(f"\n   📊 FILTER INPUTS:")
         print(f"      Nifty Prev Close : {nifty_prev_close:.2f}")
         print(f"      Nifty @ 09:40    : {nifty_940_price:.2f}")

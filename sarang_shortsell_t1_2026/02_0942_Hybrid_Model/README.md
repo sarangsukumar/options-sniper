@@ -9,12 +9,14 @@ This repository contains the **complete model architecture, training logic, walk
 
 ---
 
-## ⚙️ Strategy & Execution Mechanics
+## ⚙️ Strategy & Execution Mechanics (CRITICAL EXACT LOGIC)
+
+To avoid any confusion when rebuilding and verifying, the verification engine exactly enforces the following execution timing:
 
 * **Prediction Timing:** `09:41:30 IST` (uses ticks up to `09:40:00` for features).
-* **Entry Time:** `09:42:00 IST` (Limit order pegged to exact **09:42 OPEN** live LTP).
+* **Entry Time:** `09:42:00 IST` exactly. (The limit order is strictly pegged to the exact **09:42 OPEN** live LTP. No early entry.)
 * **Stop Loss:** Strict **3.0% Tick-by-Tick Stop Loss** (`entry_price * 1.03`) evaluated on 1-minute candle `High`.
-* **Hard Square-Off:** Unconditional intraday exit at `14:45:00 IST` (**14:45 CLOSE** price).
+* **Hard Square-Off:** Unconditional intraday exit exactly at `14:45:00 IST` (**14:45 OPEN** price). There is NO trailing take-profit for this model.
 * **Position Selection:** Top 4 stocks selected daily based on LightGBM Huber model score.
 
 ### 🛡️ Risk & Crash Protection Filters (Applied to Top 4)
@@ -26,9 +28,12 @@ This repository contains the **complete model architecture, training logic, walk
 
 ---
 
-## 🔬 16-Feature Architecture (`PURE_DB_FEATURES`)
+## 🔬 16-Feature Architecture (100% PURE EQ)
 
-The Huber model is trained on 16 features derived strictly from pre-market and 09:15–09:40 ticks:
+> **CRITICAL ARCHITECTURE NOTE:** This model has been rigorously rebuilt from the ground up to use **strictly 100% Cash Equity (EQ) physical ticks** for all individual stock features. All "ghost trades" and slippage discrepancies previously caused by Futures (F1) premium rollovers have been permanently purged from both the dataset (`short_sell_ml_dataset_v5_scratch.csv.gz`) and the live prediction pipeline (`live_0940_hybrid_pipeline.py`).
+> *Note: `scrapdata_F1` is now used EXCLUSIVELY to calculate the Nifty 50 Crash Filter, as the Cash Nifty Index does not print reliable pre-market ticks.*
+
+The Huber model is trained on 16 features derived strictly from pre-market and 09:15–09:40 EQ ticks:
 1. `gap_abs`: Absolute gap percentage at 09:07 open.
 2. `vol_gap_combo`: Volume-adjusted opening gap intensity.
 3. `stock_ret_940`: Price return from open to 09:40.
