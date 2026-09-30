@@ -350,14 +350,14 @@ def train_and_predict_single(df_today):
         _cur = _conn.cursor()
         
         # =========================================================================
-        # CRITICAL NOTE: We explicitly use `scrapdata_F1` (Futures) here ONLY for 
-        # the Nifty 50 Index. This is because Nifty 50 Cash (EQ) does not print 
-        # reliable pre-market/early ticks. All individual stocks must use `scrapdata` (EQ).
+        # CRITICAL NOTE: We explicitly use `scrapdata` (Equity Cash) here for the 
+        # Nifty 50 Index. Using `scrapdata_F1` (Futures) causes false crash triggers 
+        # on the Friday morning after expiry due to contract rollover premiums.
         # =========================================================================
         _cur.execute(f"""
             SELECT
-              (SELECT price FROM scrapdata_F1 WHERE stockname='NIFTY 50' AND DATE(time) < '{today_str}' ORDER BY time DESC LIMIT 1) AS nifty_prev_close,
-              (SELECT price FROM scrapdata_F1 WHERE stockname='NIFTY 50' AND DATE(time) = '{today_str}' AND TIME(time) >= '09:40:00' ORDER BY time ASC LIMIT 1) AS nifty_940_price
+              (SELECT price FROM scrapdata WHERE stockname='NIFTY 50' AND DATE(time) < '{today_str}' ORDER BY time DESC LIMIT 1) AS nifty_prev_close,
+              (SELECT price FROM scrapdata WHERE stockname='NIFTY 50' AND DATE(time) = '{today_str}' AND TIME(time) >= '09:40:00' ORDER BY time ASC LIMIT 1) AS nifty_940_price
         """)
         _row = _cur.fetchone()
         _conn.close()
