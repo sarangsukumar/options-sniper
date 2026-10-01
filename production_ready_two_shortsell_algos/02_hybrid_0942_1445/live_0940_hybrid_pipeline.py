@@ -44,10 +44,14 @@ AUDIT_CSV = os.path.join(BASE_DIR, 'audited_0940_hybrid_trades.csv')
 SARANG_DIR = BASE_DIR
 
 PURE_DB_FEATURES = [
-    'gap_abs', 'vol_gap_combo', 'stock_ret_940', 'morn_range_pct', 'rejection_wick',
-    'gap_0907_pct', 'gap_fade_0907_to_940_pct', 'prev_intraday_return', 'prev_intraday_vwap_gap',
-    'morning_momentum', 'morning_vol_trend', 'nifty_gap', 'sp500_overnight_ret',
-    'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap'
+    # Exact 14 features as stored in lgb_0940_hybrid_model.txt (verified via mod.feature_name())
+    # Removed 5 phantom features never in model: gap_abs, vol_gap_combo, stock_ret_940, morning_momentum, morning_vol_trend
+    # Added 3 real features carrying ~4.5% model gain: prev_1450_to_1519_pct, prev_intraday_roc_last_hour, Gap_Pct
+    'gap_0907_pct', 'gap_fade_0907_to_940_pct', 'prev_intraday_vwap_gap',
+    'prev_intraday_return', 'prev_intraday_roc_last_hour', 'morn_range_pct',
+    'rejection_wick', 'prev_1450_to_1519_pct', 'Gap_Pct',
+    'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap',
+    'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap'
 ]
 
 # Legacy features still computed from live DB (kept for compatibility)
@@ -342,6 +346,11 @@ def train_and_predict_single(df_today):
             df_today[f] = 0.0
         df_today[f] = pd.to_numeric(df_today[f], errors='coerce').fillna(0.0)
     df_today['pred_return'] = mod.predict(df_today[PURE_DB_FEATURES])
+    
+    # Filter out TMPV (Kotak alias) and deduplicate any overlapping float probabilities
+    df_today = df_today[df_today['stockname'] != 'TMPV'].reset_index(drop=True)
+    df_today = df_today.drop_duplicates(subset=['pred_return', 'close_0940']).reset_index(drop=True)
+    
     df_ranked = df_today.sort_values('pred_return', ascending=False).reset_index(drop=True)
 
 
