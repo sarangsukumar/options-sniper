@@ -579,15 +579,15 @@ def format_telegram_alert(df_orders, target_date_str):
     day_name = today_dt.day_name()
     
 def format_telegram_alert(df_orders, target_date_str):
-    """Format rich Telegram alert for 09:40 Dual-Engine selections (Flat ₹10L Capital)."""
+    """Format rich Telegram alert for 09:40 Dual-Engine selections (Flat ₹5L Capital)."""
     day_name = pd.Timestamp(target_date_str).day_name()
     
     lines = [
         f"👑 *[09:40 HYBRID DUAL-ENGINE SHORT SELL]*",
         f"📅 *Date:* `{target_date_str}` ({day_name}) | *Entry:* `09:42:00` | *Exit:* `14:45:00`",
-        f"🛡️ *Stop Loss:* `3.0% Tick-by-Tick` | *Budget:* `Top 4 Orders (Flat ₹10L Each)`",
+        f"🛡️ *Stop Loss:* `3.0% Tick-by-Tick` | *Budget:* `Top 4 Orders (Flat ₹5L Each)`",
         f"🎯 *Engine:* `Model V6 (Reversion) + Model V7 (Sniper)`",
-        f"📊 *Verified Audit Edge:* `62.82% Win Rate` | `+₹222.67L Net PnL (All 4 Ranks)`",
+        f"📊 *Verified Audit Edge:* `62.82% Win Rate` | `+₹111.34L Net PnL (All 4 Ranks)`",
         "───────────────────────────────"
     ]
     
@@ -597,7 +597,7 @@ def format_telegram_alert(df_orders, target_date_str):
         )
         lines.append(f"*Rank {r['rank']}: {r['clean_stock']}*  {badge}")
         lines.append(f"  • *Entry Limit:* `₹{r['entry_price']:.2f}` | *SL (3%):* `₹{r['stop_loss_3pct']:.2f}`")
-        lines.append(f"  • *Position:* `{r['total_quantity']:,} shares` (₹10.0L Capital) | *F&O Lot:* `{r['lotsize']}`")
+        lines.append(f"  • *Position:* `{r['total_quantity']:,} shares` (₹5.0L Capital) | *F&O Lot:* `{r['lotsize']}`")
         lines.append(f"  • *Source:* `{r['source']}` (V6 Rank: `{int(r['rank_v6'])}`, V7 Rank: `{int(r['rank_v7'])}`)")
         lines.append("───────────────────────────────")
         
@@ -717,7 +717,7 @@ def main():
     print(f"🎯 09:40 HYBRID MODEL V6+V7 TOP PICKS FOR {target_date_str} ({today_dt.day_name()}):")
     print("=" * 95)
 
-    TARGET_CAPITAL_PER_STOCK = 1000000.0  # ₹10 Lakhs Flat Position Value per stock
+    TARGET_CAPITAL_PER_STOCK = 500000.0  # ₹5 Lakhs Flat Position Value per stock
 
     for rank, p in enumerate(top_picks, start=1):
         clean = p['clean_stock']
@@ -730,10 +730,10 @@ def main():
         rk6 = p['rank_v6']
         rk7 = p['rank_v7']
 
-        # Flat ₹10L position size (cash equity MIS shares)
+        # Flat ₹5L position size (cash equity MIS shares)
         total_q = max(1, int(TARGET_CAPITAL_PER_STOCK / entry_p)) if entry_p > 0 else lot
 
-        print(f"  Rank {rank}: {clean:<12} | {sig:<15} | Qty: {total_q:,} shs (₹10L) | F&O Lot: {lot} | Entry: ₹{entry_p:.2f} | 3% SL: ₹{sl_p:.2f} | Source: {src}")
+        print(f"  Rank {rank}: {clean:<12} | {sig:<15} | Qty: {total_q:,} shs (₹5L) | F&O Lot: {lot} | Entry: ₹{entry_p:.2f} | 3% SL: ₹{sl_p:.2f} | Source: {src}")
 
         order_rows.append({
             'date': target_date_str,
