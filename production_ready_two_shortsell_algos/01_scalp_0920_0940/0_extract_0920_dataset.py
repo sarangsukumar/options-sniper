@@ -1,30 +1,24 @@
 #!/usr/bin/env python3
 """
-rebuild_dataset_from_live_logic.py
+0_extract_0920_dataset.py
 =============================================================================
-Rebuilds scalp_0920_ml_dataset.csv.gz using the EXACT same feature formulas
-as live_0920_scalp_pipeline.py.
+Extracts / Rebuilds scalp_0920_ml_dataset.csv.gz from MySQL `scrapdata`.
 
-This guarantees that when the model is trained on this dataset and deployed
-in the live pipeline, it will produce predictions that exactly match the
-certified historical simulation.
-
-Features computed (identical to live pipeline):
-  - prev_intraday_vwap_gap  : ((prev_close - prev_vwap) / prev_vwap) * 100.0
-  - prev_intraday_roc_last_hour: ((prev_close - prev_1430) / prev_1430) * 100.0
-  - prev_intraday_return    : ((prev_close - prev_open) / prev_open) * 100.0
-  - positive_arc_ratio      : pos_arcs / total_arcs (0 to 1 ratio)
-  - Gap_Pct                 : ((open_0915 - prev_close) / prev_close) * 100.0
-  - gap_0907_pct            : ((p_0907 - prev_close) / prev_close) * 100.0
-  - morn_range_pct          : (high_0919 - low_0919) / (open_0915 + 1e-9)  [ratio]
-  - rejection_wick          : (high_0919 - close_0919) / (high_0919 - low_0919 + 1e-9) [ratio]
-
-PnL computed using:
-  - Entry: first tick >= 09:21:00
-  - Exit:  last tick  <= 09:40:59
-  - Capital: ₹10,00,000 notional (qty = int(1000000 / entry_price))
-  - Charges: Kotak MIS statutory fees (STT, GST, SEBI, Stamp, Brokerage)
-  - Price filter: entry_price >= 50
+Key Properties:
+  - 100% Pure MySQL Database Ticks (Zero lookahead bias)
+  - Hardcoded Official 180+ NSE F&O Universe
+  - Dual Mode:
+      * Builds full historical dataset from 2015-01-01 to today if file absent.
+      * Incrementally appends new trading days if dataset already exists.
+  - Matches live_0920_scalp_pipeline.py feature formulas exactly:
+      * morn_range_pct          : (high_0919 - low_0919) / (open_0915 + 1e-9)
+      * rejection_wick          : (high_0919 - close_0919) / (high_0919 - low_0919 + 1e-9)
+      * positive_arc_ratio      : pos_arcs / total_arcs (0 to 1 ratio)
+      * Gap_Pct                 : ((open_0915 - prev_close) / prev_close) * 100.0
+      * gap_0907_pct            : ((p_0907 - prev_close) / prev_close) * 100.0
+      * prev_intraday_vwap_gap  : ((prev_close - prev_vwap) / prev_vwap) * 100.0
+      * prev_intraday_roc_last_hour: ((prev_close - prev_1430) / prev_1430) * 100.0
+      * prev_intraday_return    : ((prev_close - prev_open) / prev_open) * 100.0
 =============================================================================
 """
 
@@ -42,7 +36,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_FILE   = os.path.join(SCRIPT_DIR, 'data', 'scalp_0920_ml_dataset.csv.gz')
 os.makedirs(os.path.join(SCRIPT_DIR, 'data'), exist_ok=True)
 
-# Official NSE F&O Universe
+# Official NSE F&O Universe (180+ Liquid Contract Stocks)
 VALID_STOCKS = [
     'AARTIIND', 'ABB', 'ABBOTINDIA', 'ABCAPITAL', 'ABFRL', 'ACC', 'ADANIENT', 'ADANIPORTS',
     'ALKEM', 'AMBUJACEM', 'APOLLOHOSP', 'APOLLOTYRE', 'ASHOKLEY', 'ASIANPAINT', 'ASTRAL',
@@ -76,7 +70,6 @@ def get_conn():
         database='markets', cursorclass=pymysql.cursors.DictCursor
     )
 
-# EXACT SAME function as live_0920_scalp_pipeline.py
 def calc_arc_features(prices):
     if len(prices) < 3:
         return 0.0
@@ -96,36 +89,51 @@ def get_kotak_charges(qty, sell_price, buy_price):
     gst      = (40.0 + txn + sebi) * 0.18
     return round(40.0 + stt + txn + sebi + stamp + gst, 2)
 
-def build_dataset():
+def extract_features():
+    print("=" * 80)
+    print("🚀 EXTRACTING / UPDATING 09:20 DATASET FROM PURE MYSQL scrapdata")
+    print("=" * 80)
+
+    existing_df = None
+    last_date = '2015-01-01'
+    if os.path.exists(OUT_FILE):
+        try:
+            existing_df = pd.read_csv(OUT_FILE, low_memory=False)
+            last_date = str(existing_df['short_date'].max())
+            print(f"   • Existing dataset loaded: {len(existing_df):,} rows (up to {last_date})")
+        except Exception as e:
+            print(f"   ⚠️ Could not read existing dataset ({e}), building from scratch.")
+
     conn = get_conn()
-    cur  = conn.cursor()
+    cur = conn.cursor()
 
-    # Get all trading dates
-    cur.execute("SELECT DISTINCT date FROM scrapdata WHERE date >= '2020-01-01' ORDER BY date ASC")
+    # Query all available dates from MySQL
+    cur.execute("SELECT DISTINCT date FROM scrapdata WHERE date >= '2015-01-01' ORDER BY date ASC")
     all_dates = [str(r['date']) for r in cur.fetchall()]
-    conn.close()
 
-    print(f"   • Found {len(all_dates)} trading dates (2020-2026)")
-    print(f"   • Processing with EXACT same formulas as live_0920_scalp_pipeline.py...")
+    if existing_df is not None:
+        target_dates = [d for d in all_dates if d > last_date]
+        if not target_dates:
+            print(f"   ✅ Dataset is already up to date! (Last date: {last_date})")
+            conn.close()
+            return
+        print(f"   • Found {len(target_dates)} new dates to extract ({target_dates[0]} to {target_dates[-1]}).")
+    else:
+        target_dates = all_dates
+        print(f"   • Extracting full historical dataset: {len(target_dates)} trading sessions (2015-present).")
 
     records = []
+    prev_day_dict = {}
 
-    for idx, target_date in enumerate(all_dates):
-        if (idx + 1) % 50 == 0:
-            print(f"   • Processed {idx+1}/{len(all_dates)} dates... ({len(records)} rows so far)")
-
-        conn = get_conn()
-        cur  = conn.cursor()
-
-        # Find previous trading date
+    for idx, target_date in enumerate(target_dates):
+        # Fetch previous day date
         cur.execute(f"SELECT MAX(date) as pd FROM scrapdata WHERE date < '{target_date}'")
-        r = cur.fetchone()
-        prev_date = str(r['pd']) if r and r['pd'] else None
+        row = cur.fetchone()
+        prev_date = str(row['pd']) if row and row['pd'] else None
         if not prev_date:
-            conn.close()
             continue
 
-        # Fetch prev day full ticks
+        # Fetch prev day ticks (for VWAP and overnight features)
         cur.execute(f"""
             SELECT stockname, time, price, volume FROM scrapdata
             WHERE date = '{prev_date}'
@@ -134,7 +142,7 @@ def build_dataset():
         """)
         prev_rows = cur.fetchall()
 
-        # Fetch today's morning ticks (09:07 premarket + 09:15-09:19 opening)
+        # Fetch today's morning ticks (09:07 - 09:19)
         cur.execute(f"""
             SELECT stockname, time, price FROM scrapdata
             WHERE date = '{target_date}'
@@ -143,7 +151,7 @@ def build_dataset():
         """)
         morn_rows = cur.fetchall()
 
-        # Fetch today's 09:21-09:41 ticks for PnL calculation
+        # Fetch today's ticks for execution PnL (09:21 - 09:41)
         cur.execute(f"""
             SELECT stockname, time, price FROM scrapdata
             WHERE date = '{target_date}'
@@ -151,38 +159,34 @@ def build_dataset():
             ORDER BY stockname, time ASC
         """)
         pnl_rows = cur.fetchall()
-        conn.close()
 
-        # Build dicts
-        prev_dict = {}
+        # Group ticks by stock
+        pday = {}
         for r in prev_rows:
-            s = r['stockname'].strip().upper()
-            if s not in prev_dict:
-                prev_dict[s] = []
-            prev_dict[s].append(r)
+            stk = r['stockname'].strip().upper()
+            if stk not in pday: pday[stk] = []
+            pday[stk].append(r)
 
-        morn_dict = {}
+        today_morn = {}
         for r in morn_rows:
-            s = r['stockname'].strip().upper()
-            if s not in morn_dict:
-                morn_dict[s] = []
-            morn_dict[s].append(r)
+            stk = r['stockname'].strip().upper()
+            if stk not in today_morn: today_morn[stk] = []
+            today_morn[stk].append(r)
 
-        pnl_dict = {}
+        today_pnl = {}
         for r in pnl_rows:
-            s = r['stockname'].strip().upper()
-            if s not in pnl_dict:
-                pnl_dict[s] = []
-            pnl_dict[s].append(r)
+            stk = r['stockname'].strip().upper()
+            if stk not in today_pnl: today_pnl[stk] = []
+            today_pnl[stk].append(r)
 
-        # Compute features — IDENTICAL to live_0920_scalp_pipeline.py
-        for stock, mticks in morn_dict.items():
-            if stock not in VALID_SET:
-                continue
-            if stock not in prev_dict or len(prev_dict[stock]) < 10:
+        for stock in VALID_STOCKS:
+            if stock not in today_morn or stock not in pday or stock not in today_pnl:
                 continue
 
-            pticks   = prev_dict[stock]
+            pticks = pday[stock]
+            if len(pticks) < 10:
+                continue
+
             p_prices = [float(x['price']) for x in pticks]
             p_vols   = [float(x['volume']) if x.get('volume') is not None else 1.0 for x in pticks]
             p_times  = [str(x['time']).split()[-1] for x in pticks]
@@ -190,97 +194,90 @@ def build_dataset():
             p_open  = p_prices[0]
             p_close = p_prices[-1]
 
-            # VWAP — identical formula
             cum_pv = sum(p * v for p, v in zip(p_prices, p_vols))
             cum_v  = sum(p_vols)
             vwap   = cum_pv / cum_v if cum_v > 0 else p_close
             prev_intraday_vwap_gap = ((p_close - vwap) / vwap) * 100.0
 
-            # ROC Last Hour — identical formula
             lh_prices = [p for t, p in zip(p_times, p_prices) if t >= '14:30:00']
             p_1430 = lh_prices[0] if lh_prices else p_close
             prev_intraday_roc_last_hour = ((p_close - p_1430) / p_1430) * 100.0
-
-            # Prev Intraday Return — identical formula
             prev_intraday_return = ((p_close - p_open) / p_open) * 100.0
 
-            # Today's morning ticks split — identical
+            # Morning ticks
+            mticks = today_morn[stock]
             p_0907_ticks = [float(x['price']) for x in mticks if str(x['time']).split()[-1] < '09:15:00']
-            p_0915_ticks = [float(x['price']) for x in mticks if str(x['time']).split()[-1] >= '09:15:00']
-
-            if not p_0915_ticks:
+            morn_15_19   = [x for x in mticks if str(x['time']).split()[-1] >= '09:15:00']
+            if not morn_15_19:
                 continue
 
+            p_0915_ticks = [float(x['price']) for x in morn_15_19]
             open_0915  = p_0915_ticks[0]
             close_0919 = p_0915_ticks[-1]
             high_0919  = max(p_0915_ticks)
             low_0919   = min(p_0915_ticks)
 
-            # Price filter — identical to live pipeline
-            if close_0919 < 50:
-                continue
-
-            # Gap features — identical formulas
             Gap_Pct = ((open_0915 - p_close) / p_close) * 100.0
-            if p_0907_ticks:
-                p_0907      = p_0907_ticks[0]
-                gap_0907_pct = ((p_0907 - p_close) / p_close) * 100.0
-            else:
-                gap_0907_pct = Gap_Pct
+            gap_0907_pct = ((p_0907_ticks[0] - p_close) / p_close) * 100.0 if p_0907_ticks else Gap_Pct
 
-            # Range and wick — identical formulas
             morn_range_pct = (high_0919 - low_0919) / (open_0915 + 1e-9)
             rejection_wick = (high_0919 - close_0919) / (high_0919 - low_0919 + 1e-9)
             pos_arc_ratio  = calc_arc_features(p_0915_ticks)
 
-            # PnL calculation (entry 09:21, exit 09:41)
-            stock_pnl_ticks = pnl_dict.get(stock, [])
-            if not stock_pnl_ticks:
+            # PnL simulation (entry 09:21, exit 09:41)
+            pnl_ticks = today_pnl[stock]
+            if not pnl_ticks:
                 continue
 
-            entry_ticks = [x for x in stock_pnl_ticks if str(x['time']).split()[-1] >= '09:21:00']
-            exit_ticks  = [x for x in stock_pnl_ticks if str(x['time']).split()[-1] <= '09:40:59']
-
-            if not entry_ticks or not exit_ticks:
+            entry_price = float(pnl_ticks[0]['price'])
+            if entry_price < 50:
                 continue
 
-            entry_price = float(entry_ticks[0]['price'])
-            exit_price  = float(exit_ticks[-1]['price'])
+            sl_price = entry_price * 1.03
+            exit_price = 0
+            qty = int(1000000.0 / entry_price)
 
-            if entry_price <= 0 or exit_price <= 0:
-                continue
+            for t in pnl_ticks:
+                p = float(t['price'])
+                if p >= sl_price:
+                    exit_price = sl_price
+                    break
 
-            qty     = int(1000000.0 / entry_price)
+            if exit_price == 0:
+                exit_price = float(pnl_ticks[-1]['price'])
+
             charges = get_kotak_charges(qty, entry_price, exit_price)
             pnl_net = ((entry_price - exit_price) * qty) - charges
 
             records.append({
-                'short_date'                : target_date,
-                'clean_stock'               : stock,
-                'morn_range_pct'            : round(morn_range_pct, 8),
-                'pnl_net'                   : round(pnl_net, 2),
-                'prev_intraday_vwap_gap'    : round(prev_intraday_vwap_gap, 6),
-                'prev_intraday_roc_last_hour': round(prev_intraday_roc_last_hour, 6),
-                'prev_intraday_return'      : round(prev_intraday_return, 6),
-                'positive_arc_ratio'        : round(pos_arc_ratio, 6),
-                'Gap_Pct'                   : round(Gap_Pct, 6),
-                'gap_0907_pct'              : round(gap_0907_pct, 6),
-                'rejection_wick'            : round(rejection_wick, 8),
-                'entry_price'               : round(entry_price, 2),
-                'exit_price'                : round(exit_price, 2),
+                'short_date'                 : target_date,
+                'clean_stock'                : stock,
+                'morn_range_pct'             : round(morn_range_pct, 8),
+                'pnl_net'                    : round(pnl_net, 2),
+                'prev_intraday_vwap_gap'     : round(prev_intraday_vwap_gap, 6),
+                'prev_intraday_roc_last_hour' : round(prev_intraday_roc_last_hour, 6),
+                'prev_intraday_return'       : round(prev_intraday_return, 6),
+                'positive_arc_ratio'         : round(pos_arc_ratio, 6),
+                'Gap_Pct'                    : round(Gap_Pct, 6),
+                'gap_0907_pct'               : round(gap_0907_pct, 6),
+                'rejection_wick'             : round(rejection_wick, 8),
+                'entry_price'                : round(entry_price, 2),
+                'exit_price'                 : round(exit_price, 2)
             })
 
-    df = pd.DataFrame(records)
-    df = df.drop_duplicates(subset=['short_date', 'clean_stock'])
-    df.to_csv(OUT_FILE, index=False, compression='gzip')
-    print(f"\n✅ Dataset rebuilt: {len(df)} rows saved to {OUT_FILE}")
-    print(f"   • Win rate: {(df['pnl_net'] > 0).mean()*100:.1f}%")
-    print(f"   • rejection_wick range: {df['rejection_wick'].min():.4f} to {df['rejection_wick'].max():.4f}")
-    print(f"   • morn_range_pct mean: {df['morn_range_pct'].mean():.6f}")
+        if (idx + 1) % 25 == 0 or idx == len(target_dates) - 1:
+            print(f"   • Extracted [{idx+1}/{len(target_dates)}] sessions ({len(records)} rows)...")
+
+    conn.close()
+
+    new_df = pd.DataFrame(records)
+    if existing_df is not None:
+        combined = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        combined = new_df
+
+    combined.to_csv(OUT_FILE, index=False, compression='gzip')
+    print(f"✅ Success! Updated dataset: {len(combined):,} total rows saved to {OUT_FILE}")
 
 if __name__ == '__main__':
-    print("="*75)
-    print("🔧 09:20 SCALP DATASET REBUILDER (Live-Pipeline-Parity Version)")
-    print("="*75)
-    print("\n1. Connecting to MySQL and fetching all trading dates...")
-    build_dataset()
+    extract_features()
