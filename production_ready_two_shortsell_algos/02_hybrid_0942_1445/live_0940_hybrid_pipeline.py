@@ -211,6 +211,17 @@ def compute_features(df_prev_ticks, df_0907, df_morn_ticks, target_date_str, cl_
             gap_0907_pct = ((p_0907 - p_prev_close) / p_prev_close * 100.0) if p_prev_close > 0 else 0.0
             gap_pct = ((p_open - p_prev_close) / p_prev_close * 100.0) if p_prev_close > 0 else 0.0
             gap_fade = ((p_940 - p_0907) / p_0907 * 100.0) if p_0907 > 0 else 0.0
+            stock_ret_940 = ((p_940 - p_open) / p_open * 100.0) if p_open > 0 else 0.0
+            gap_abs = abs(gap_pct)
+            # Momentum gap_fade = ((p_940 - p_0907) / p_0907 * 100.0) if p_0907 > 0 else 0.0 Volume Trend (09:25 to 09:40 vs 09:15 to 09:25)
+            prices_25 = [p for t, p in zip(grp["time"].astype(str), prices) if t.split()[-1] >= "09:25:00"]
+            p_0925 = prices_25[0] if prices_25 else p_open
+            morning_momentum = ((p_940 - p_0925) / p_0925 * 100.0) if p_0925 > 0 else 0.0
+            vols = grp.get("volume", [1.0]*len(prices))
+            vol_15_25 = sum([v for t, v in zip(grp["time"].astype(str), vols) if t.split()[-1] < "09:25:00"])
+            vol_25_40 = sum([v for t, v in zip(grp["time"].astype(str), vols) if t.split()[-1] >= "09:25:00"])
+            morning_vol_trend = (vol_25_40 / vol_15_25) if vol_15_25 > 0 else 1.0
+            vol_gap_combo = gap_pct * morning_vol_trend
             morn_range = ((p_high - p_low) / p_open * 100.0) if p_open > 0 else 0.0
             rejection = ((p_high - p_940) / p_open * 100.0) if p_open > 0 else 0.0
 
@@ -223,6 +234,11 @@ def compute_features(df_prev_ticks, df_0907, df_morn_ticks, target_date_str, cl_
                 'prev_intraday_vwap_gap': pm.get('prev_intraday_vwap_gap', 0.0),
                 'prev_intraday_return': pm.get('prev_intraday_return', 0.0),
                 'prev_intraday_roc_last_hour': pm.get('prev_intraday_roc_last_hour', 0.0),
+                'gap_abs': gap_abs,
+                'vol_gap_combo': vol_gap_combo,
+                'stock_ret_940': stock_ret_940,
+                'morning_momentum': morning_momentum,
+                'morning_vol_trend': morning_vol_trend,
                 'morn_range_pct': morn_range,
                 'rejection_wick': rejection,
                 'prev_1450_to_1519_pct': pm.get('prev_1450_to_1519_pct', 0.0),
@@ -593,9 +609,9 @@ def main():
         print("\n✅ Retrain complete. Model saved. Exiting.")
         return
 
-    target_date_str = args.date if args.date else datetime.now().strftime('%Y-%m-%d')
+    today_actual = datetime.now().strftime('%Y-%m-%d')
+    target_date_str = args.date if args.date else today_actual
     day_name = pd.to_datetime(target_date_str).strftime('%A')
-
 
     print("="*83)
     print("🚀 LIVE 09:40 AM SHORT SELL MODEL (CERTIFIED 1-LOT TOP 4 SELECTION)")
@@ -604,6 +620,26 @@ def main():
     print(f"1. Fetching live MySQL data for {target_date_str} ({day_name})...")
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    # ── HOLIDAY / NON-TRADING DAY GUARD ──────────────────────────────────
+    # If running live (no explicit --date), check whether today's ticks
+    # are actually in the DB. If MAX(date) < today, it's a holiday.
+    if not args.date:
+        cursor.execute("SELECT MAX(date) as dt FROM scrapdata_F1")
+        latest_row = cursor.fetchone()
+        latest_date = str(latest_row['dt']) if latest_row and latest_row['dt'] else None
+        if latest_date != today_actual:
+            conn.close()
+            msg = (
+                f"⚠️ <b>[09:40 HYBRID] Market Holiday / No Data</b>\n"
+                f"📅 Today: {today_actual} | Latest DB date: {latest_date}\n"
+                f"🚫 No F1 ticks found for today — market is likely closed.\n"
+                f"✅ Pipeline exiting safely. No orders will be placed."
+            )
+            print(msg)
+            send_telegram_alert(msg)
+            return
+
     cursor.execute(f"SELECT MAX(date) as dt FROM scrapdata_F1 WHERE date < '{target_date_str}'")
     prev_row = cursor.fetchone()
     prev_date_str = str(prev_row['dt']) if prev_row and prev_row['dt'] else None

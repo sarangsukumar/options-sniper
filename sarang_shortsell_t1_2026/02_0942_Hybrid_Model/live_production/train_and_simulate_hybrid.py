@@ -30,11 +30,11 @@ from concurrent.futures import ThreadPoolExecutor
 import warnings
 warnings.filterwarnings('ignore')
 
-BASE_DIR = '/home/ubuntu/sarang_2026_shortsell_algos/02_Best_Longer_Window_0942_1445'
-DATA_FILE = '/home/ubuntu/v5_from_scratch/data/short_sell_ml_dataset_v5_scratch.csv'
-LOTS_FILE = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/historical_lotsize_new.csv'
-CACHE_SL_FILE = '/home/ubuntu/V8_Hybrid_Engine/sl3_results.csv'
-LEGACY_TRADES_FILE = '/home/ubuntu/V6_V7_Hybrid_Standalone/legacy_v6_v7_trades.csv'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_FILE = os.path.join(os.path.dirname(BASE_DIR), 'data', 'short_sell_ml_dataset_v5_scratch.csv.gz')
+LOTS_FILE = "/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/historical_lotsize_new.csv"
+CACHE_SL_FILE = ''
+LEGACY_TRADES_FILE = ''
 OUT_TRADES_CSV = os.path.join(BASE_DIR, 'longer_window_trades_futures_and_eq.csv')
 
 def get_db_connection():
@@ -77,13 +77,15 @@ def main():
     
     # Map dynamic lot sizes
     lot_map = load_lot_map()
-    df['lotsize'] = [get_exact_lot(s, d, lot_map, q) for s, d, q in zip(df['clean_stock'], df['date_dt'], df['quantity'])]
+    df['lotsize'] = 1000
     
     pure_db_features = [
         'gap_0907_pct', 'gap_fade_0907_to_940_pct',
         'prev_intraday_vwap_gap', 'prev_intraday_return', 'prev_intraday_roc_last_hour',
         'morn_range_pct', 'rejection_wick'
     ]
+    if 'prev_intraday_roc_last_hour' not in df.columns:
+        df['prev_intraday_roc_last_hour'] = 0.0
     for f in pure_db_features:
         df[f] = pd.to_numeric(df[f], errors='coerce').fillna(0.0)
         
@@ -166,7 +168,11 @@ def main():
     conn.close()
 
     trades['f1_pts'] = f1_pts_list
-    trades['f1_gross_pnl'] = trades['f1_pts'] * trades['lotsize']
+    
+    # Capital allocated: ₹10,00,000
+    trades['f1_entry_p'] = [r['entry_price_0940'] if 'entry_price_0940' in r else r.get('p_0940', 1000) for _, r in trades.iterrows()]
+    trades['qty_10L_f1'] = (1000000.0 / trades['f1_entry_p']).fillna(0).astype(int)
+    trades['f1_gross_pnl'] = trades['f1_pts'] * trades['qty_10L_f1']
     trades['f1_net_pnl'] = trades['f1_gross_pnl'] - 300.0
     
     # 4. Simulate on Equity (`scrapdata`) with 3% SL
@@ -200,12 +206,14 @@ def main():
         eq_pts_list = list(ex.map(eval_eq, trades.to_dict('records')))
         
     trades['eq_pts'] = eq_pts_list
-    trades['eq_gross_pnl'] = trades['eq_pts'] * trades['lotsize']
+    trades['eq_entry_p'] = [r['entry_price_0940'] if 'entry_price_0940' in r else r.get('p_0940', 1000) for _, r in trades.iterrows()]
+    trades['qty_10L_eq'] = (1000000.0 / trades['eq_entry_p']).fillna(0).astype(int)
+    trades['eq_gross_pnl'] = trades['eq_pts'] * trades['qty_10L_eq']
     trades['eq_net_pnl'] = trades['eq_gross_pnl'] - 300.0
     
     # Save master log
     out_cols = [
-        'date_str', 'clean_stock', 'year', 'day_name', 'lotsize',
+        'date_str', 'clean_stock', 'year', 'day_name', 'qty_10L_eq',
         'f1_pts', 'f1_gross_pnl', 'f1_net_pnl',
         'eq_pts', 'eq_gross_pnl', 'eq_net_pnl'
     ]
