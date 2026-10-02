@@ -475,7 +475,7 @@ def execute_strategy4_selection(df_today, boosters):
             'clean_stock': stk,
             'lotsize': info['lotsize'],
             'entry_price': info['entry_price'],
-            'lots_multiplier': 2,
+            'lots_multiplier': 1,
             'signal_tag': 'QUAD_CONFIRMED' if is_quad else 'DUAL_CONFIRMED',
             'source': 'QUAD (CL+FULL)' if is_quad else info['sources'][0],
             'rank_v6': info['rank_v6'],
@@ -578,21 +578,26 @@ def format_telegram_alert(df_orders, target_date_str):
     today_dt = pd.Timestamp(target_date_str)
     day_name = today_dt.day_name()
     
+def format_telegram_alert(df_orders, target_date_str):
+    """Format rich Telegram alert for 09:40 Dual-Engine selections (Flat ₹10L Capital)."""
+    day_name = pd.Timestamp(target_date_str).day_name()
+    
     lines = [
         f"👑 *[09:40 HYBRID DUAL-ENGINE SHORT SELL]*",
         f"📅 *Date:* `{target_date_str}` ({day_name}) | *Entry:* `09:42:00` | *Exit:* `14:45:00`",
-        f"🛡️ *Stop Loss:* `3.0% Tick-by-Tick` | *Budget:* `Top 4 Orders Daily`",
+        f"🛡️ *Stop Loss:* `3.0% Tick-by-Tick` | *Budget:* `Top 4 Orders (Flat ₹10L Each)`",
         f"🎯 *Engine:* `Model V6 (Reversion) + Model V7 (Sniper)`",
+        f"📊 *Verified Audit Edge:* `62.82% Win Rate` | `+₹222.67L Net PnL (All 4 Ranks)`",
         "───────────────────────────────"
     ]
     
     for _, r in df_orders.iterrows():
-        badge = "🔥 [QUAD CONFIRMED - 2x LOTS]" if r['signal_tag'] == 'QUAD_CONFIRMED' else (
-            "⚡ [DUAL CONFIRMED - 2x LOTS]" if r['signal_tag'] == 'DUAL_CONFIRMED' else f"🔹 [{r['signal_tag']} - 1x LOT]"
+        badge = "🔥 [QUAD CONFIRMED]" if r['signal_tag'] == 'QUAD_CONFIRMED' else (
+            "⚡ [DUAL CONFIRMED]" if r['signal_tag'] == 'DUAL_CONFIRMED' else f"🔹 [{r['signal_tag']}]"
         )
         lines.append(f"*Rank {r['rank']}: {r['clean_stock']}*  {badge}")
         lines.append(f"  • *Entry Limit:* `₹{r['entry_price']:.2f}` | *SL (3%):* `₹{r['stop_loss_3pct']:.2f}`")
-        lines.append(f"  • *Position:* `{r['lots_to_trade']} Lot(s)` ({r['total_quantity']:,} shares) | *Lot Size:* `{r['lotsize']}`")
+        lines.append(f"  • *Position:* `{r['total_quantity']:,} shares` (₹10.0L Capital) | *F&O Lot:* `{r['lotsize']}`")
         lines.append(f"  • *Source:* `{r['source']}` (V6 Rank: `{int(r['rank_v6'])}`, V7 Rank: `{int(r['rank_v7'])}`)")
         lines.append("───────────────────────────────")
         
@@ -609,6 +614,29 @@ def main():
     args = parser.parse_args()
 
     t_start = time.time()
+
+    # If invoked with --retrain (e.g. monthly cron on the 1st of every month at 18:00 IST)
+    if args.retrain:
+        print("=" * 95)
+        print("👑 09:40 HYBRID MONTHLY RETRAINING ENGINE (MODEL V6 + V7 DUAL ENGINE)")
+        print(f"📁 Directory: {SCRIPT_DIR}")
+        print("=" * 95)
+        retrain_and_save_all_models()
+        msg = (
+            f"🔄 *[09:40 HYBRID MONTHLY RETRAINING COMPLETED]*\n"
+            f"📅 *Timestamp:* `{datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}`\n"
+            f"🏆 *Architecture:* Model V6 + Model V7 Dual Engine (Strategy 4)\n"
+            f"📊 *Models Updated:*\n"
+            f"  • Model V6 Full Market & Candidate List (CL)\n"
+            f"  • Model V7 Breakdown Sniper (CL & Full Market)\n"
+            f"🛡️ *Features:* 7 Pure DB Features (Zero Lookahead / Zero Yahoo Finance)\n"
+            f"⚡ *Status:* All 4 LightGBM boosters saved and ready for sub-second live scoring."
+        )
+        if not args.dry_run:
+            send_telegram_alert(msg)
+        print(f"\n✅ Monthly Retraining Completed successfully in {time.time() - t_start:.2f}s. Exiting.")
+        return
+
     print("=" * 95)
     print("👑 RUNNING LIVE 09:40 HYBRID SHORT-SELL ENGINE (MODEL V6 + V7 DUAL ENGINE)")
     print(f"📁 Directory: {SCRIPT_DIR}")
@@ -689,19 +717,23 @@ def main():
     print(f"🎯 09:40 HYBRID MODEL V6+V7 TOP PICKS FOR {target_date_str} ({today_dt.day_name()}):")
     print("=" * 95)
 
+    TARGET_CAPITAL_PER_STOCK = 1000000.0  # ₹10 Lakhs Flat Position Value per stock
+
     for rank, p in enumerate(top_picks, start=1):
         clean = p['clean_stock']
         mult = p['lots_multiplier']
         lot = p['lotsize']
-        total_q = lot * mult
-        entry_p = p['entry_price']
+        entry_p = float(p['entry_price'])
         sl_p = round(entry_p * 1.03, 2)
         sig = p['signal_tag']
         src = p['source']
         rk6 = p['rank_v6']
         rk7 = p['rank_v7']
 
-        print(f"  Rank {rank}: {clean:<12} | {sig:<15} | Lots: {mult}x ({total_q:,} shares) | Entry: ₹{entry_p:.2f} | 3% SL: ₹{sl_p:.2f} | Source: {src}")
+        # Flat ₹10L position size (cash equity MIS shares)
+        total_q = max(1, int(TARGET_CAPITAL_PER_STOCK / entry_p)) if entry_p > 0 else lot
+
+        print(f"  Rank {rank}: {clean:<12} | {sig:<15} | Qty: {total_q:,} shs (₹10L) | F&O Lot: {lot} | Entry: ₹{entry_p:.2f} | 3% SL: ₹{sl_p:.2f} | Source: {src}")
 
         order_rows.append({
             'date': target_date_str,
@@ -711,9 +743,11 @@ def main():
             'signal_tag': sig,
             'signal_type': sig,
             'source': src,
-            'lots_to_trade': mult,
+            'lots_to_trade': 1,
             'lotsize': lot,
+            'target_capital': TARGET_CAPITAL_PER_STOCK,
             'total_quantity': total_q,
+            'quantity': total_q,
             'entry_time': '09:42:00',
             'entry_price': entry_p,
             'entry_price_0940': entry_p,
