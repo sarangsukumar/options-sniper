@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROD_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
 
-LOT_CSV = os.path.join(PROD_ROOT, 'config', 'historical_lotsize_new.csv')
+LOT_CSV = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/historical_lotsize_new.csv'
 OUT_DIR = os.path.join(SCRIPT_DIR, 'data')
 OUT_FILE = os.path.join(OUT_DIR, 'scalp_0920_ml_dataset.csv.gz')
 

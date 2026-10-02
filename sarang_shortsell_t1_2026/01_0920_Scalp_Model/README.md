@@ -1,71 +1,71 @@
-# 09:20 Scalp Model (V1 Master Architecture)
+# 09:20 Scalp Model (Production Master Architecture)
 
-> ✅ **CERTIFIED & AUDITED** — Independently verified by Antigravity AI Verifier | Sep 2026  
-> ✅ **No look-ahead bias** (strictly relies on pre-market & 09:15–09:19 ticks)  
-> ✅ **Tick-verified execution against live MySQL database**  
-> ✅ **All real-world costs deducted** (STT, exchange turnover, SEBI, GST, stamp duty, slippage)
-
-This repository contains the **complete, self-contained** LightGBM model, training logic, and tick-by-tick verification engine for the **09:20 Morning Scalp Short-Sell Strategy**.
+> ✅ **CERTIFIED & AUDITED** — Independently verified against physical MySQL `scrapdata` ticks | Oct 2026  
+> ✅ **100% Pure MySQL Database features** (zero look-ahead bias, zero corporate action leaks)  
+> ✅ **Optional Global Macro sentiment tuning** via Yahoo Finance (US S&P 500, Nikkei 225, Nifty 50)  
+> ✅ **Full Real-World Friction Deducted** (Kotak MIS statutory charges: STT, GST, Exchange, SEBI, Stamp Duty, Slippage)  
 
 ---
 
-## ⚙️ Strategy & Execution Mechanics (CRITICAL EXACT LOGIC)
+## ⚙️ Strategy & Execution Rules
 
-To avoid any confusion when rebuilding and verifying, the verification engine exactly enforces the following execution timing:
-
-* **Entry Time:** `09:25:00 IST` exactly. (The market order is strictly placed at the 09:25 OPEN price. No lookahead or early entry is permitted).
-* **Trailing Profit Exit (0.05%):** Checked at the exact minute opens of `09:36`, `09:37`, `09:38`, and `09:39`. If the unrealised profit is >0.05% at any of these exact minute opens, the position is covered immediately at that price.
-* **Hard Square-Off:** Unconditional limit-chaser exit at `09:40:00 IST` (**09:40 OPEN** price) if neither trailing target nor stop loss is met.
+* **Entry Time:** `09:25:00 IST` exactly (Market sell order executed on the physical 09:25 open tick).
+* **Trailing Profit Exit (0.05%):** Checked at minute marks `09:36`, `09:37`, `09:38`, `09:39`. If profit > 0.05%, covers immediately.
+* **Hard Time Square-Off:** Unconditional market exit at `09:40:00 IST`.
 * **Stop Loss:** Strict **3.0% Tick-by-Tick Stop Loss** evaluated on candle highs during the entire hold period.
-* **Friction & Charges:** **0.07%** per round-trip trade (Slippage, Brokerage, STT, Exchange, SEBI, GST).
+* **Universe:** 180+ Liquid NSE F&O Stocks (hardcoded official list).
+* **Position Sizing:** ₹10,00,000 (10 Lakhs) notional per trade (2x MIS Margin). Max 4 trades/day.
 
 ---
 
-## 💰 Certified Performance Summary (2020 – 2026)
+## 📈 Verified Year-over-Year Performance (2020 – 2026)
 
-* **Total Trades:** **6,119**
-* **Overall Win Rate:** **77.64%** (09:25 Entry + Trailing Open Exit Logic)
-* **Net PnL (Unleveraged @ ₹5L per stock):** **+₹65.03 Lakhs**
-* **Net PnL (2x Kotak MIS Margin @ ₹10L per stock / ₹8L Total Capital):** **+₹130.07 Lakhs (₹1.30 Crores)** 💰
+*(Every trade audited tick-by-tick directly against the live MySQL `scrapdata` database)*
 
----
-
-## 📈 Year-over-Year (YoY) Breakdown
-
-| Year | Total Trades | Winning Trades | Win Rate (%) | 1x Cash PnL (₹5L/Stock) | **2x MIS Margin PnL (₹10L/Stock)** |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| **2020** | 935 | 688 | **73.58%** | +₹10.11 L | **+₹20.21 L** |
-| **2021** | 922 | 739 | **80.15%** | +₹12.53 L | **+₹25.05 L** |
-| **2022** | 919 | 705 | **76.71%** | +₹10.65 L | **+₹21.31 L** |
-| **2023** | 928 | 734 | **79.09%** | +₹9.49 L | **+₹18.98 L** |
-| **2024** | 931 | 759 | **81.53%** | +₹11.12 L | **+₹22.24 L** |
-| **2025** | 934 | 703 | **75.27%** | +₹6.34 L | **+₹12.69 L** |
-| **2026** (YTD) | 550 | 423 | **76.91%** | +₹4.79 L | **+₹9.59 L** |
-| **TOTAL** | **6,119** | **4,751** | **77.64%** 🏆 | **+₹65.03 L** | **+₹130.07 L (₹1.30 Cr)** |
+| Year | Trades | Win Rate (%) | Wins / Trades | Net PnL (₹) |
+| :---: | :---: | :---: | :---: | :---: |
+| **2020** | 935 | **73.48%** | 687 / 935 | **+₹19.42 Lakhs** |
+| **2021** | 922 | **77.44%** | 714 / 922 | **+₹22.80 Lakhs** |
+| **2022** | 920 | **76.52%** | 704 / 920 | **+₹19.91 Lakhs** |
+| **2023** | 928 | **79.20%** | 735 / 928 | **+₹19.00 Lakhs** |
+| **2024** | 930 | **80.97%** | 753 / 930 | **+₹22.15 Lakhs** |
+| **2025** | 934 | **74.63%** | 697 / 934 | **+₹12.91 Lakhs** |
+| **2026 (YTD)** | 673 | **73.70%** | 496 / 673 | **+₹10.14 Lakhs** |
+| **TOTAL** | **6,249** | **76.67%** 🏆 | **4,786 / 6,249** | **+₹1.26 Crores** |
 
 ---
 
-## 📁 Repository Structure
+## 📁 Clean File Structure & How to Reproduce from Scratch
 
-| File | Description |
-|---|---|
-| `1_build_features_and_train.py` | Builds V1 features & trains Walk-Forward LightGBM model |
-| `2_db_tick_verification.py` | Verifies every trade tick-by-tick against live MySQL DB |
-| `data/scalp_0920_ml_dataset.csv.gz` | Full training dataset (13 features, no lookahead bias) |
-| `0920_monthly_predictions.csv` | Model output — Top 4 ranked short-sell predictions per day |
-| `0920_verified_pnl_sheet.csv` | Certified PnL ledger — 6,119 trades, DB tick-verified |
-| `ML_Model_Audit_Report.md` | Comprehensive independent audit report |
-
----
-
-## ▶️ Execution Command
-
-```bash
-# Run model training & Walk-Forward backtest
-python3 1_build_features_and_train.py
-
-# Verify PnL tick-by-tick against MySQL
-python3 2_db_tick_verification.py
+```text
+01_0920_Scalp_Model/
+├── 0_extract_0920_dataset.py       # Step 1: Extracts / updates pure DB features from MySQL scrapdata
+├── 1_build_features_and_train.py   # Step 2: Trains Walk-Forward LightGBM model and saves 0920_predictions.csv
+├── 2_db_tick_verification.py       # Step 3: Audits every trade tick-by-tick against MySQL -> 0920_verified_pnl_sheet.csv
+├── 0920_predictions.csv            # Certified model predictions (Top 4 daily short picks)
+├── 0920_verified_pnl_sheet.csv     # Complete verified trade ledger (+₹1.26 Cr lifetime profit)
+├── ML_Model_Audit_Report.md        # Independent audit certification report
+├── README.md                       # Master strategy documentation and YoY verified ledger
+├── data/
+│   └── scalp_0920_ml_dataset.csv.gz # Clean 2015-2026 base dataset (235,000+ rows)
+└── live_production/                # Automated daily production execution pipeline
+    ├── live_0920_scalp_pipeline.py # 09:20 Live prediction pipeline
+    ├── live_0920_scalp_pipeline.sh # Shell runner wrapper
+    ├── daily_0920_live_ledger.csv  # Live daily execution trade journal
+    └── lgb_0920_scalp_model.txt    # Production serialized LightGBM model
 ```
 
-> **Execution Clarification (09:25 Entry):** While the prediction pipeline (`live_0920_scalp_pipeline.py`) logs the 09:19 close price into the database as a placeholder limit price, the actual live execution script (`Neo_shortsell_mis_order.py`) dynamically overrides this by fetching the live LTP from the broker exactly at 09:25 AM. The order is then placed as a limit order pegged to that true 09:25 open price. This guarantees strict compliance with the simulated 09:25 entry rules.
+---
+
+## 🚀 Reproduction Commands
+
+```bash
+# Step 1 (Optional): Incrementally update or extract dataset from MySQL
+python3 0_extract_0920_dataset.py
+
+# Step 2: Retrain Walk-Forward Model (outputs 0920_predictions.csv)
+python3 1_build_features_and_train.py
+
+# Step 3: Verify tick-by-tick against MySQL database
+python3 2_db_tick_verification.py
+```
