@@ -32,7 +32,9 @@ if not os.path.exists(FEATURE_FILE):
 
 LOTS_FILE = os.path.join(DATA_DIR, 'historical_lotsize_new.csv')
 PNL_FILE = os.path.join(DATA_DIR, 'markets_pnl0325.csv.gz')
-SL_MASTER_FILE = os.path.join(DIR, 'sl3_points_master.csv')
+SL_MASTER_FILE = os.path.join(DATA_DIR, 'sl3_points_master.csv')
+if not os.path.exists(SL_MASTER_FILE):
+    SL_MASTER_FILE = os.path.join(DIR, 'sl3_points_master.csv')
 OUTPUT_LEDGER = os.path.join(DIR, 'audited_0940_hybrid_trades.csv')
 
 def main():
