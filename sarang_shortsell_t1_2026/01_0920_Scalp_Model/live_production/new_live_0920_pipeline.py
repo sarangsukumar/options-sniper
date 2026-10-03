@@ -370,6 +370,7 @@ def select_top4(df_features, macro, today_str, dry_run=False):
     df_features['prob'] = model.predict(df_features[FEATURES_920])
     df_features = df_features.sort_values('prob', ascending=False).reset_index(drop=True)
     top4 = df_features.head(4).copy()
+    top4['quantity'] = top4['entry_price'].apply(lambda p: int(500000 / p) if pd.notna(p) and p > 0 else 0)
 
     print("\n🏆 TOP 4 PICKS (09:20 Scalp):")
     print(f"{'Rank':<6} {'Stock':<16} {'Prob':<10} {'Entry~':<12}")
