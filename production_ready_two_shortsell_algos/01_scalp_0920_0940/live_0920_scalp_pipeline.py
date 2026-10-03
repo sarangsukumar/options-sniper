@@ -249,6 +249,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     print("=" * 75)
 
     today_actual = datetime.now().strftime('%Y-%m-%d')
+    is_custom_date = target_date_str is not None
     conn = get_db_connection()
     with conn.cursor() as cursor:
         if not target_date_str:
@@ -260,7 +261,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         # If we're running live (no explicit --date) and the latest DB date
         # is NOT today, that means no ticks were downloaded for today →
         # today is a market holiday or weekend. Abort cleanly.
-        if target_date_str != today_actual:
+        if not is_custom_date and target_date_str != today_actual:
             conn.close()
             msg = (
                 f"⚠️ <b>[09:20 SCALP] Market Holiday / No Data</b>\n"

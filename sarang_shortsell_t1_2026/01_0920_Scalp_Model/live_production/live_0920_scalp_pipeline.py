@@ -73,7 +73,7 @@ VALID_STOCKS = [
     'SAIL', 'SBICARD', 'SBILIFE', 'SBIN', 'SHREECEM', 'SHRIRAMFIN', 'SIEMENS', 'SRF', 'SUNPHARMA',
     'SUNTV', 'SYNGENE', 'TATACHEM', 'TATACOMM', 'TATACONSUM', 'TATAMOTORS', 'TATAPOWER', 'TATASTEEL',
     'TCS', 'TECHM', 'TITAN', 'TORNTPHARM', 'TRENT', 'TVSMOTOR', 'UBL', 'ULTRACEMCO', 'UNITDSPR',
-    'UPL', 'VEDL', 'VOLTAS', 'WIPRO', 'ZEEL', 'ZYDUSLIFE', 'TMPV'
+    'UPL', 'VEDL', 'VOLTAS', 'WIPRO', 'ZEEL', 'ZYDUSLIFE', 
 ]
 VALID_SET = set(VALID_STOCKS)
 
@@ -248,13 +248,32 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     print("⚡ 09:20 - 09:40 SCALP PREDICTION ENGINE (SESSION 1)")
     print("=" * 75)
 
+    today_actual = datetime.now().strftime('%Y-%m-%d')
+    is_custom_date = target_date_str is not None
     conn = get_db_connection()
     with conn.cursor() as cursor:
         if not target_date_str:
             cursor.execute("SELECT MAX(date) as dt FROM scrapdata")
             latest_row = cursor.fetchone()
-            target_date_str = str(latest_row['dt']) if latest_row and latest_row['dt'] else datetime.now().strftime('%Y-%m-%d')
-        
+            target_date_str = str(latest_row['dt']) if latest_row and latest_row['dt'] else today_actual
+
+        # ── HOLIDAY / NON-TRADING DAY GUARD ──────────────────────────────────
+        # If we're running live (no explicit --date) and the latest DB date
+        # is NOT today, that means no ticks were downloaded for today →
+        # today is a market holiday or weekend. Abort cleanly.
+        if not is_custom_date and target_date_str != today_actual:
+            conn.close()
+            msg = (
+                f"⚠️ <b>[09:20 SCALP] Market Holiday / No Data</b>\n"
+                f"📅 Today: {today_actual} | Latest DB date: {target_date_str}\n"
+                f"🚫 No morning ticks found for today — market is likely closed.\n"
+                f"✅ Pipeline exiting safely. No orders will be placed."
+            )
+            print(msg)
+            if not no_telegram:
+                send_telegram_alert(msg)
+            return
+
         # Determine previous trading date
         cursor.execute(f"SELECT MAX(date) as prev_dt FROM scrapdata WHERE date < '{target_date_str}'")
         prev_row = cursor.fetchone()
@@ -439,14 +458,13 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         return
 
     df_candidates = pd.DataFrame(processed_records)
-    
-    print(f"   • Qualified Universe Candidates: {len(df_candidates)} stocks")
-
+    df_candidates = df_candidates[df_candidates['stockname'] != 'TMPV'].reset_index(drop=True)
     # 4. Run Model Inference
     X = df_candidates[FEATURES].fillna(0.0)
     df_candidates['short_prob'] = model.predict(X)
 
     # 5. Select Top 4 Candidates
+    df_candidates = df_candidates.drop_duplicates(subset=['short_prob', 'close_0919']).reset_index(drop=True)
     df_candidates = df_candidates.sort_values('short_prob', ascending=False).reset_index(drop=True)
     top4 = df_candidates.head(4).copy()
 
