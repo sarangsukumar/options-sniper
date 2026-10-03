@@ -26,9 +26,9 @@ DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(DIR, 'data')
 
 # Local data inputs
-FEATURE_FILE = os.path.join(DATA_DIR, 'short_sell_ml_dataset_v5_continuous.csv')
+FEATURE_FILE = os.path.join(DATA_DIR, 'short_sell_ml_dataset_from_mysql_scratch.csv')
 if not os.path.exists(FEATURE_FILE):
-    FEATURE_FILE = os.path.join(DATA_DIR, 'short_sell_ml_dataset_v5_scratch.csv.gz')
+    FEATURE_FILE = os.path.join(DATA_DIR, 'short_sell_ml_dataset_v5_continuous.csv')
 
 LOTS_FILE = os.path.join(DATA_DIR, 'historical_lotsize_new.csv')
 PNL_FILE = os.path.join(DATA_DIR, 'markets_pnl0325.csv.gz')
@@ -77,7 +77,10 @@ def main():
     pnl['buy_day'] = pd.to_datetime(pnl['simulationdate'], format='mixed', dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
     pnl['clean_stock'] = pnl['stockname'].astype(str).str.strip().str.upper()
     cl_only = set(zip(pnl[pnl['sell_exec_type'] == 'Custom Limit Fill']['buy_day'], pnl[pnl['sell_exec_type'] == 'Custom Limit Fill']['clean_stock']))
-    df['is_strict_cl'] = [(b, s) in cl_only for b, s in zip(df['buy_day'], df['clean_stock'])]
+    if 'buy_day' in df.columns:
+        df['is_strict_cl'] = [(b, s) in cl_only for b, s in zip(df['buy_day'], df['clean_stock'])]
+    else:
+        df['is_strict_cl'] = [(d, s) in cl_only for d, s in zip(df['date_str'], df['clean_stock'])]
 
     pure_db_features = [
         'gap_0907_pct', 'gap_fade_0907_to_940_pct',

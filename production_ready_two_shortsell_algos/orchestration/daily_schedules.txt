@@ -1,42 +1,38 @@
 # ==============================================================================================
 # PRODUCTION DAILY SCHEDULES FOR DUAL SHORT-SELL ENGINES
-# Managed via PM2 (thescheduler / crontab)
+# Updated: 2026-10-03 — Both pipelines rewritten from scratch based on canonical historical models
+#   0920: sarang_shortsell_t1_2026/01_0920_Scalp_Model/live_production/new_live_0920_pipeline.py
+#   0940: sarang_shortsell_t1_2026/02_0942_Hybrid_Model/live_production/new_live_0940_pipeline.py
 # All times are Indian Standard Time (IST)
 # ==============================================================================================
 
-# 1. 09:20 SCALP ENGINE (20-Minute Rapid Mean-Reversion)
-# Execution: Starts at 09:20:20 IST (20s buffer for 09:15-09:20 candle data ingestion)
-# Square-off: 09:40:00 AM SHARP (100% Margin Released back to Cash)
-20 9 * * 1-5 sleep 30 && bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/01_scalp_0920_0940/run_0920_scalp_pipeline.sh >> /home/ubuntu/cron_0920_scalp.log 2>&1
+# ── 09:20 SCALP ENGINE ──────────────────────────────────────────────────────────────────────────
+# Prediction: Runs at 09:20:30 IST. Extracts 09:07-09:19 ticks from MySQL scrapdata.
+# Exit rules: 0.05% trail (09:36–09:40) + 0.30% trail (09:40–14:45) + 2.0% all-time SL
+# Capital: ₹10,00,000 per stock | qty = int(1000000 / price)
+20 9 * * 1-5 sleep 30 && bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/01_0920_Scalp_Model/live_production/run_new_0920_pipeline.sh >> /home/ubuntu/cron_0920_scalp.log 2>&1
 
-# 1B. 09:20 SCALP SIMULATED PNL RECONCILER & AUDIT REPORT
-# Runs after market close at 16:00:00 PM IST (Mon-Fri)
-00 16 * * 1-5 bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/01_scalp_0920_0940/run_0920_evening_reconcile.sh >> /home/ubuntu/cron_0920_reconcile.log 2>&1
+# ── 09:40 HYBRID DUAL ENGINE (V6 Broad + V7 Fader Sniper) ──────────────────────────────────────
+# Prediction: Runs at 09:41:30 IST. Extracts 09:07-09:40 ticks from MySQL scrapdata_F1 (EQ fallback).
+# Monday exclusion built-in. Strategy 4: Quad/Dual → 50/50 CL/Full fill.
+# Exit rules: 3.0% Stop Loss + 14:45 hard exit
+# Capital: ₹5,00,000 per stock | qty = int(500000 / price)
+41 9 * * 1-5 sleep 30 && bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/02_0942_Hybrid_Model/live_production/run_new_0940_pipeline.sh >> /home/ubuntu/cron_0940_hybrid.log 2>&1
 
-# 2. 09:40 HYBRID DUAL ENGINE (V6 Reversion + V7 Premarket Fader Sniper)
-# Execution: Starts at 09:41:20 IST (20s buffer for 09:15-09:40 ICICI data ingestion)
-# Entry: 09:42:00 AM IST (Re-deploys ₹6.0L freed capital)
-# Square-off: 14:45:00 PM IST (with 3.0% Stop Loss & optional 11:30 AM Cut-Loss exit)
-41 9 * * 1-5 sleep 30 && bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/02_hybrid_0942_1445/run_0940_hybrid_pipeline.sh >> /home/ubuntu/cron_0940_hybrid.log 2>&1
+# ── Monthly Model Retrainers ─────────────────────────────────────────────────────────────────────
+# Retrains both models on the 1st of each month using the full historical dataset rebuilders.
+# 0920 retrainer: rebuilds scalp_0920_ml_dataset.csv.gz + reruns 1_build_features_and_train.py → saves updated lgb_0920_scalp_model.txt
+# 0940 retrainer: rebuilds short_sell_ml_dataset_v5_continuous.csv + reruns rebuild_and_verify_from_scratch.py → saves all 4 model files
 
-# 2B. 09:40 HYBRID SIMULATED PNL RECONCILER & AUDIT REPORT
-# Runs after market close at 16:00:20 PM IST (Mon-Fri)
-00 16 * * 1-5 sleep 30 && bash /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/02_hybrid_0942_1445/run_0940_evening_reconcile.sh >> /home/ubuntu/cron_0940_reconcile.log 2>&1
+# 0920 retrain: 1st of month @ 17:45 IST
+45 17 1 * * python3 /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/01_0920_Scalp_Model/0_extract_0920_dataset.py >> /home/ubuntu/cron_0920_monthly_retrain.log 2>&1 && python3 /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/01_0920_Scalp_Model/1_build_features_and_train.py >> /home/ubuntu/cron_0920_monthly_retrain.log 2>&1
 
-# 2C. 09:40 HYBRID HUBER MODEL MONTHLY RETRAINER
-# Retrains the Huber Loss + 4-Year Rolling + Time-Decay model on the 1st of every month at 6:00 PM IST
-# Ensures the model is always calibrated to the freshest 4 years of market data
-00 18 1 * * python3 /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/02_hybrid_0942_1445/live_0940_hybrid_pipeline.py --retrain >> /home/ubuntu/cron_0940_monthly_retrain.log 2>&1
-
+# 0940 retrain: 1st of month @ 18:00 IST
+00 18 1 * * python3 /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/02_0942_Hybrid_Model/rebuild_and_verify_from_scratch.py >> /home/ubuntu/cron_0940_monthly_retrain.log 2>&1
 
 # ==============================================================================================
 # Capital Flow Timeline:
-# 09:20 AM - 09:40 AM: ₹6.0 Lakhs deployed in 09:20 Scalp (4 stocks)
-# 09:40:00 AM (Sharp): ₹0.0 deployed (100% margin returned to cash)
-# 09:42 AM - 14:45 PM: ₹6.0 Lakhs re-deployed in 09:40 Hybrid (4 stocks)
-# 14:45:00 PM (Sharp): ₹0.0 deployed (100% cash overnight, zero gap risk)
+# 09:20 AM - 14:45 PM: ₹10L deployed in 09:20 Scalp (4 stocks × ₹2.5L, exit rules apply 09:36+)
+# 09:42 AM - 14:45 PM: ₹5L deployed in 09:40 Hybrid (4 stocks × ₹1.25L, 3.0% SL)
+# 14:45:00 PM (Sharp): Both systems exit — zero overnight exposure
 # ==============================================================================================
-# 1C. 09:20 SCALP MODEL MONTHLY RETRAINER
-# Retrains the Binary + Time-Decay model on the 1st of every month at 5:45 PM IST
-45 17 1 * * python3 /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_two_shortsell_algos/01_scalp_0920_0940/live_0920_scalp_pipeline.py --retrain >> /home/ubuntu/cron_0920_monthly_retrain.log 2>&1
-
