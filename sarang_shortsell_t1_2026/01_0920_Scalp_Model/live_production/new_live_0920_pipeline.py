@@ -636,6 +636,22 @@ def main():
     # 4. Save predictions CSV
     save_predictions(top4, today_str)
 
+    # 4.5 Insert into shortsell_orders DB table for Kotak Neo MIS Execution
+    if not args.dry_run:
+        try:
+            sys.path.append('/home/ubuntu/KotakCodes1')
+            from insert_shortsell_orders import insert_shortsell_orders
+            
+            # 0920 needs 'close_0919' mapped to price and 'lotsize' or 'quantity'
+            top4_for_insert = top4.copy()
+            top4_for_insert['close_0919'] = top4_for_insert['entry_price']
+            
+            insert_shortsell_orders(top4_for_insert, model_name='0920_SCALP', trade_date=today_str)
+        except Exception as e:
+            print(f"⚠️ Could not insert into shortsell_orders table: {e}")
+    else:
+        print("\n[DRY RUN] Skipping insertion into shortsell_orders table.")
+
     # 5. Telegram alert — predictions
     notify_predictions(top4, today_str, dry_run=args.dry_run)
 
