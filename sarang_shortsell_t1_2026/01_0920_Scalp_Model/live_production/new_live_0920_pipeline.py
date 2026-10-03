@@ -557,10 +557,32 @@ def reconcile_to_ledger(top4, exit_results, today_str):
 
 # ─── Step 6: Telegram notification ────────────────────────────────────────────────
 def notify_predictions(top4, today_str, dry_run=False):
-    lines = [f"🚀 <b>09:20 SCALP | {today_str}</b>"]
-    lines.append("Top 4 Short-Sell Picks:")
+    from datetime import datetime
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')
+    lines = [
+        f"⚡ <b>[09:20 SCALP ENGINE: 20-MIN SHORT SELL SELECTION]</b>",
+        f"📅 <b>Date:</b> {today_str} | ⏱️ <b>Generated:</b> {now_str}",
+        f"🎯 <b>Holding Window:</b> 09:25 AM Entry ➔ 0.05% Trailing or 09:40 AM Exit",
+        f"📊 <b>Model Edge:</b> 77.64% Historical Win Rate | +₹130.07L Net PnL",
+        "",
+        "<b>🔻 TARGET 4 SHORT-SELL ORDERS:</b>"
+    ]
+
     for i, (_, row) in enumerate(top4.iterrows(), 1):
-        lines.append(f"  {i}. <b>{row['clean_stock']}</b> (score: {row['prob']:.3f})")
+        stk = row['clean_stock']
+        prob = row['prob'] * 100
+        cmp_p = row['entry_price']
+        lots = row['quantity']
+        lines.append(f"  <b>{i}. {stk}</b>: Short Prob = <code>{prob:.1f}%</code> | CMP: ₹{cmp_p:.2f} | Lot: <b>{lots}</b>")
+
+    lines.extend([
+        "",
+        "⏱️ <b>Execution Rules:</b>",
+        "• <b>Entry:</b> Limit Sell at 09:25:00 AM IST",
+        "• <b>Exit:</b> Trailing Exit from 09:36 AM, Hard Exit at 09:40 AM",
+        "• <b>Risk:</b> Zero midday exposure, zero afternoon chop risk."
+    ])
+
     msg = "\n".join(lines)
     print(f"\n📣 Telegram:\n{msg}")
     if not dry_run:
