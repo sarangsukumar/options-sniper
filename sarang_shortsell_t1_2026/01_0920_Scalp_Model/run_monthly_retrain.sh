@@ -1,0 +1,4 @@
+#!/bin/bash
+cd /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/01_0920_Scalp_Model
+python3 0_extract_0920_dataset.py
+python3 1_build_features_and_train.py
