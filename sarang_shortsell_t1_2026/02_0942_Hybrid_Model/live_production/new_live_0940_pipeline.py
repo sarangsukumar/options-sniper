@@ -452,6 +452,7 @@ def score_and_select_top4(df_features, cl_stocks_today):
             break
 
     top4 = pd.DataFrame(res[:4])
+    top4['quantity'] = top4['entry_price'].apply(lambda p: int(500000 / p) if pd.notna(p) and p > 0 else 0)
 
     print("\n🏆 TOP 4 PICKS (09:40 Hybrid):")
     print(f"{'Rank':<6} {'Stock':<16} {'Signal':<18} {'Source':<16} {'V6':<6} {'V7':<6}")

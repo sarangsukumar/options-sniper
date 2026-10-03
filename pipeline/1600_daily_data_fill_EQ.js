@@ -320,7 +320,8 @@ async function processAllStocks(stockList, scripCodes, todayStr) {
                     todayStr,
                     'TRUE',
                     'EQ',
-                    'ICICI'
+                    'ICICI',
+                    dp.volume || 0
                 ]);
             }
             console.log(`[${index + 1}/${stockList.length}] ${stockName.padEnd(12)} | Fetched ${intradayRows.length.toString().padStart(4)} ticks [SUCCESS]`);
@@ -412,7 +413,7 @@ async function runDownload() {
         console.log(`\nInserting ${allDbRows.length} intraday tick records into MySQL...`);
         const insertSql = `
             INSERT INTO ${TABLENAME} 
-            (stockname, price, open, high, low, close, time, cretime, modtime, date, isvalid, is_future, source) 
+            (stockname, price, open, high, low, close, time, cretime, modtime, date, isvalid, is_future, source, volume) 
             VALUES ?
         `;
         const chunkSize = 1000;
