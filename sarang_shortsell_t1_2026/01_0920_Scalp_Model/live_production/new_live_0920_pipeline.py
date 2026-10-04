@@ -46,7 +46,7 @@ warnings.filterwarnings('ignore')
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR    = SCRIPT_DIR                                       # lgb_0920_scalp_model.txt lives here
 PARENT_DIR   = os.path.dirname(SCRIPT_DIR)                     # 01_0920_Scalp_Model/
-DATASET_FILE = os.path.join(PARENT_DIR, 'data', 'scalp_0920_ml_dataset.csv.gz')
+DATASET_FILE = os.path.join(SCRIPT_DIR, 'data', 'scalp_0920_ml_dataset.csv.gz')
 MODEL_FILE   = os.path.join(MODEL_DIR,  'lgb_0920_scalp_model.txt')
 PRED_TODAY   = os.path.join(MODEL_DIR,  'live_0920_predictions_today.csv')
 LEDGER_FILE  = os.path.join(MODEL_DIR,  'daily_0920_live_ledger.csv')
@@ -81,10 +81,8 @@ VALID_STOCKS = [
 
 # ─── 13 Features (must match 1_build_features_and_train.py exactly) ─────────────
 FEATURES_920 = [
-    'morn_range_pct', 'prev_intraday_vwap_gap', 'prev_intraday_roc_last_hour',
-    'prev_intraday_return', 'positive_arc_ratio', 'Gap_Pct', 'gap_0907_pct',
-    'rejection_wick', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap',
-    'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap'
+    'prev_intraday_vwap_gap', 'prev_intraday_roc_last_hour', 'prev_intraday_return',
+    'positive_arc_ratio', 'Gap_Pct', 'gap_0907_pct', 'morn_range_pct', 'rejection_wick'
 ]
 
 # ─── DB Connection ───────────────────────────────────────────────────────────────
@@ -263,72 +261,34 @@ def select_top4(df_features, macro, today_str, dry_run=False):
     import datetime as dt_module
     current_year = dt_module.date.today().year
 
-    print(f"\n🤖 Training live 13-feature model (train years < {current_year}) from historical dataset...")
+    print(f"\n🤖 Training live 8-feature model (train years < {current_year}) from historical dataset...")
     if not os.path.exists(DATASET_FILE):
         print(f"   ❌ Dataset not found: {DATASET_FILE}")
         sys.exit(1)
 
-    # ── Step A: Build macro time series (exact copy of 1_build_features_and_train.py logic) ──
-    print("   Downloading macro time series for training merge...")
-    try:
-        data = yf.download(['^NSEI', '^GSPC', '^N225'], start='2018-01-01', end='2027-01-01', progress=False)
-        if isinstance(data.columns, pd.MultiIndex):
-            df_close_ts = data['Close'].reset_index()
-            df_open_ts  = data['Open'].reset_index()
-        else:
-            df_close_ts = pd.DataFrame(data['Close']).reset_index()
-            df_open_ts  = pd.DataFrame(data['Open']).reset_index()
-
-        dates_range = pd.date_range(start='2018-01-01', end='2027-01-01', freq='B')
-        macro_ts = pd.DataFrame({'date': dates_range})
-        macro_ts['date_str'] = macro_ts['date'].dt.strftime('%Y-%m-%d')
-
-        nifty_c = df_close_ts[['Date', '^NSEI']].rename(columns={'Date': 'date', '^NSEI': 'nifty_close'})
-        nifty_o = df_open_ts[['Date', '^NSEI']].rename(columns={'Date': 'date', '^NSEI': 'nifty_open'})
-        macro_ts = macro_ts.merge(nifty_c, on='date', how='left').merge(nifty_o, on='date', how='left')
-        macro_ts['nifty_gap'] = (macro_ts['nifty_open'] / macro_ts['nifty_close'].shift(1)) - 1
-
-        sp_c = df_close_ts[['Date', '^GSPC']].rename(columns={'Date': 'date', '^GSPC': 'sp500_close'})
-        macro_ts = macro_ts.merge(sp_c, on='date', how='left')
-        macro_ts['sp500_overnight_ret'] = (macro_ts['sp500_close'].shift(1) / macro_ts['sp500_close'].shift(2)) - 1
-
-        nikkei_c = df_close_ts[['Date', '^N225']].rename(columns={'Date': 'date', '^N225': 'nikkei_close'})
-        nikkei_o = df_open_ts[['Date', '^N225']].rename(columns={'Date': 'date', '^N225': 'nikkei_open'})
-        macro_ts = macro_ts.merge(nikkei_c, on='date', how='left').merge(nikkei_o, on='date', how='left')
-        macro_ts['nikkei_gap'] = (macro_ts['nikkei_open'] / macro_ts['nikkei_close'].shift(1)) - 1
-
-        for c in ['sp500_overnight_ret', 'nikkei_gap', 'nifty_gap']:
-            macro_ts[c] = macro_ts[c].fillna(0)
-        macro_ts['nifty_vs_sp500_gap'] = macro_ts['nifty_gap'] - macro_ts['sp500_overnight_ret']
-        macro_ts['nifty_vs_nikkei_gap'] = macro_ts['nifty_gap'] - macro_ts['nikkei_gap']
-
-        global_macro_ts = macro_ts[['date_str', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap']]
-        print("   ✅ Macro time series built.")
-    except Exception as e:
-        print(f"   ⚠️  yfinance failed for training macro ({e}). Using zeros.")
-        global_macro_ts = None
-
-    # ── Step B: Load and merge historical dataset ─────────────────────────────
+    # Load historical dataset — pure DB features, no macro
     df_hist = pd.read_csv(DATASET_FILE, low_memory=False)
+    
+    # EXACT BACKTEST PARITY: Filter historical dataset to strict universe BEFORE training
+    valid_set = set([s.strip().upper() for s in VALID_STOCKS])
+    df_hist['clean_stock'] = df_hist['clean_stock'].astype(str).str.strip().str.upper()
+    df_hist = df_hist[df_hist['clean_stock'].isin(valid_set)].reset_index(drop=True)
+
     df_hist['year'] = pd.to_datetime(df_hist['short_date']).dt.year
-
-    if global_macro_ts is not None:
-        df_hist = df_hist.merge(global_macro_ts, left_on='short_date', right_on='date_str', how='left')
-    else:
-        for c in ['nifty_gap', 'sp500_overnight_ret', 'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap']:
-            df_hist[c] = 0.0
-
     df_hist[FEATURES_920] = df_hist[FEATURES_920].fillna(0)
     df_hist['target'] = (df_hist['pnl_net'] > 0).astype(int)
+
 
     params_920 = {
         'objective': 'binary',
         'metric': 'auc',
         'boosting_type': 'gbdt',
-        'learning_rate': 0.05,
-        'max_depth': 5,
-        'num_leaves': 31,
-        'feature_fraction': 0.8,
+        'learning_rate': 0.03,
+        'max_depth': 4,
+        'num_leaves': 15,
+        'min_child_samples': 50,
+        'subsample': 0.8,
+        'colsample_bytree': 0.8,
         'verbose': -1,
         'random_state': 42
     }
@@ -347,24 +307,7 @@ def select_top4(df_features, macro, today_str, dry_run=False):
     )
     print(f"   ✅ Model trained.")
 
-    # ── Step C: Score today's features with today's macro from time series ───
-    macro_cols = ['nifty_gap', 'sp500_overnight_ret', 'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap']
-    if global_macro_ts is not None:
-        today_macro_row = global_macro_ts[global_macro_ts['date_str'] == today_str]
-        if len(today_macro_row) > 0:
-            for c in macro_cols:
-                df_features[c] = float(today_macro_row[c].iloc[0])
-            ng = float(today_macro_row['nifty_gap'].iloc[0])
-            sp = float(today_macro_row['sp500_overnight_ret'].iloc[0])
-            nk = float(today_macro_row['nikkei_gap'].iloc[0])
-            print(f"   ✅ Today's macro (from ts): nifty_gap={ng:.4f}, sp500={sp:.4f}, nikkei={nk:.4f}")
-        else:
-            print(f"   ⚠️  No macro row found for {today_str}. Using zeros for scoring.")
-            for c in macro_cols:
-                df_features[c] = 0.0
-    else:
-        for c in macro_cols:
-            df_features[c] = 0.0
+    # ── Step C: Score today's features ──────────────────────────────────────────
 
     df_features[FEATURES_920] = df_features[FEATURES_920].fillna(0)
     df_features['prob'] = model.predict(df_features[FEATURES_920])
@@ -379,6 +322,7 @@ def select_top4(df_features, macro, today_str, dry_run=False):
         rank = i + 1
         print(f"  {rank:<5} {row['clean_stock']:<16} {row['prob']:<10.4f} {row.get('entry_price', 0):<12.2f}")
 
+    
     return top4
 
 
@@ -519,6 +463,7 @@ def save_predictions(top4, today_str):
     top4_save.insert(0, 'short_date', today_str)
     top4_save.to_csv(PRED_TODAY, index=False)
     print(f"\n💾 Predictions saved to {PRED_TODAY}")
+    
     return top4_save
 
 def reconcile_to_ledger(top4, exit_results, today_str):
