@@ -21,7 +21,7 @@
         14:45         : hard exit
    8. Reconcile and append to daily_0920_live_ledger.csv
 
- Capital: ₹10,00,000 per stock  →  qty = int(1000000 / sell_price)
+ Capital: ₹5,00,000 per stock  →  qty = int(500000 / sell_price)
 ========================================================================================
 """
 
@@ -379,7 +379,7 @@ def monitor_exits(top4, today_str, dry_run=False):
             continue
 
         entry_price = float(entry_ticks[0]['price'])
-        qty         = int(1000000 / entry_price)
+        qty         = int(500000 / entry_price)
         sl_price    = entry_price * 1.02    # 2.0% stop loss (price goes UP → we lose on short)
 
         # Trailing stop state
