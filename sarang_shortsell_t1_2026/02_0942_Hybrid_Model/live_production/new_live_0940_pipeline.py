@@ -44,8 +44,8 @@ warnings.filterwarnings('ignore')
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR    = SCRIPT_DIR                                       # lgb_0940_*.txt files live here
 PARENT_DIR   = os.path.dirname(SCRIPT_DIR)                     # 02_0942_Hybrid_Model/
-CERTIFIED_DATA_DIR = '/home/ubuntu/sarang_2026_shortsell_algos/02_Best_Longer_Window_0942_1445/data'
-DATA_DIR     = CERTIFIED_DATA_DIR
+CERTIFIED_DATA_FILE = '/home/ubuntu/sarang_2026_shortsell_algos/02_Best_Longer_Window_0942_1445/data/short_sell_ml_dataset_v5_continuous.csv'
+DATA_DIR     = os.path.dirname(CERTIFIED_DATA_FILE)
 
 MODEL_V6_CL   = os.path.join(MODEL_DIR, 'lgb_0940_v6_cl.txt')
 MODEL_V7_CL   = os.path.join(MODEL_DIR, 'lgb_0940_v7_cl.txt')
@@ -257,7 +257,7 @@ def load_cl_universe(today_str):
 
 
 # ─── Step 3: Train models on-the-fly and score ───────────────────────────────────
-FEATURE_FILE = '/home/ubuntu/sarang_2026_shortsell_algos/02_Best_Longer_Window_0942_1445/data/short_sell_ml_dataset_v5_continuous.csv'
+FEATURE_FILE = CERTIFIED_DATA_FILE
 
 def score_and_select_top4(df_features, cl_stocks_today):
     """
