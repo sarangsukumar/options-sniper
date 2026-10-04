@@ -231,6 +231,35 @@ python3 /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/production_ready_t
 | **SINGLE_CL** | 3,496 | **62.0%** | **+₹131.62L** | **+0.41%** |
 | **SINGLE_FULL** | 879 | **60.0%** | **+₹30.09L** | **+0.38%** |
 
+### 7.4. Advanced Execution: The 14:00 (2:00 PM) 50/50 Profit Booking Policy
+
+To address the practical reality that intraday winners can round-trip during the 14:30–15:15 closing squeeze, an intermediate 14:00 decision policy was developed and audited tick-by-tick across all 4,970 trades:
+
+#### 1. Policy Mechanics:
+- **At 14:00:00 IST:**
+  - If a stock is currently in **profit** ($P_{14:00} < P_{\text{entry}}$): Square off **50% of the position quantity** at market to bank accumulated morning profits. The remaining 50% runs to 14:45:00 IST with the original 3.0% Stop Loss.
+  - If a stock is currently in **loss** ($P_{14:00} \ge P_{\text{entry}}$): Do **not** cut early. Allow 100% of the position full room to recover until 14:45:00 IST (with 3.0% Stop Loss).
+
+#### 2. Audited Comparative Performance (2020 – 2026):
+
+| Metric | Original Baseline (Hold to 14:45) | 14:00 50/50 Profit Booking Policy | Absolute Gain |
+| :--- | :---: | :---: | :---: |
+| **Overall Win Rate** | 59.96% | **64.87%** | **+4.91% higher win rate** |
+| **Profit Factor** | 1.97 | **2.15** | **+0.18 improvement** |
+| **Net PnL (Flat ₹5L Sizing)** | +₹100.70 Lakhs | **+₹117.66 Lakhs** | **+₹16.96 Lakhs pure alpha** |
+| **Net PnL (Flat ₹10L Sizing)**| +₹201.41 Lakhs | **+₹235.32 Lakhs** | **+₹33.91 Lakhs pure alpha** |
+| **Annual Consistency** | — | **7 out of 7 Years (100%)** | **Beats baseline every single year** |
+
+#### 3. Year-by-Year Comparison Table (₹5L Sizing):
+- **2020:** +₹14.68L vs +₹13.61L (**+₹1.07L**)
+- **2021:** +₹14.33L vs +₹13.89L (**+₹0.44L**)
+- **2022:** +₹13.59L vs +₹13.52L (**+₹0.07L**)
+- **2023:** +₹27.13L vs +₹15.87L (**+₹11.26L**)
+- **2024:** +₹22.73L vs +₹21.63L (**+₹1.10L**)
+- **2025:** +₹19.19L vs +₹18.01L (**+₹1.18L**)
+- **2026 YTD:** +₹6.01L vs +₹4.18L (**+₹1.83L**)
+- **Total:** **+₹117.66 Lakhs** vs +₹100.70 Lakhs (**+₹16.96 Lakhs alpha, 100% win rate across all 7 years**).
+
 ---
 
 ## 8. Live Production Operations & Automated Cron Setup
