@@ -1,3 +1,0 @@
-#!/bin/bash
-cd /home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/02_0942_Hybrid_Model
-python3 rebuild_and_verify_from_scratch.py
