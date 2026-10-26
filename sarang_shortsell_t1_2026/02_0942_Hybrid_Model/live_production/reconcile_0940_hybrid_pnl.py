@@ -142,7 +142,7 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
             f1_entry_p, f1_exit_p, f1_exit_time, f1_exit_reason, f1_net_pnl, f1_ret_pct = None, None, None, None, None, None
             if ticks_f1:
                 f1_entry_p = float(ticks_f1[0]['price'])
-                f1_sl = round(f1_entry_p * 1.03, 2)
+                f1_sl = round(f1_entry_p * 1.0225, 2)
                 f1_exit_p = float(ticks_f1[-1]['price'])
                 f1_exit_time = '14:45:00'
                 f1_exit_reason = 'TIME_EXIT'
@@ -169,7 +169,7 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
             eq_entry_p, eq_exit_p, eq_exit_time, eq_exit_reason, eq_net_pnl, eq_ret_pct = None, None, None, None, None, None
             if ticks_eq:
                 eq_entry_p = float(ticks_eq[0]['price'])
-                eq_sl = round(eq_entry_p * 1.03, 2)
+                eq_sl = round(eq_entry_p * 1.0225, 2)
                 eq_exit_p = float(ticks_eq[-1]['price'])
                 eq_exit_time = '14:45:00'
                 eq_exit_reason = 'TIME_EXIT'
@@ -195,7 +195,7 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
             # Primary columns (prioritize Futures if available, otherwise Cash Equity)
             use_f1 = (f1_entry_p is not None)
             p_entry = f1_entry_p if use_f1 else eq_entry_p
-            p_sl = round(p_entry * 1.03, 2)
+            p_sl = round(p_entry * 1.0225, 2)
             p_exit = f1_exit_p if use_f1 else eq_exit_p
             p_exit_time = f1_exit_time if use_f1 else eq_exit_time
             p_exit_reason = f1_exit_reason if use_f1 else eq_exit_reason
@@ -206,6 +206,7 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
             p_ret = round((p_pts / p_entry) * 100.0, 2) if p_entry > 0 else 0.0
 
             df_ledger.loc[idx, 'entry_price'] = p_entry
+            df_ledger.loc[idx, 'stop_loss_2_25pct'] = p_sl
             df_ledger.loc[idx, 'stop_loss_3pct'] = p_sl
             df_ledger.loc[idx, 'exit_time'] = p_exit_time
             df_ledger.loc[idx, 'exit_price'] = p_exit
@@ -274,7 +275,7 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
             eq_reason = r.get('eq_exit_reason', '')
             print(f"{i+1:<3} | {stk:<10} | {sig:<16} | {lots:<4} | {f1_n:>10,.2f}   | {f1_reason:<10} | {eq_n:>10,.2f}   | {eq_reason:<10}")
         print("-" * 105)
-        print(f"SUMMARY: Total Setups: 4 (₹5L Each) | Futures Net PnL = ₹{day_net_f1:,.2f} | Equity Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate_f1:.1f}%")
+        print(f"SUMMARY: Total Setups: 4 (₹7.5L Each) | Futures Net PnL = ₹{day_net_f1:,.2f} | Equity Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate_f1:.1f}%")
         print("=" * 105)
 
         # Telegram Message
@@ -282,7 +283,7 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
             f"{pnl_color} <b>[09:40 HYBRID: RECONCILED PNL REPORT]</b>",
             f"📅 <b>Date:</b> {d} | ⏱️ <b>Audit Time:</b> {now_ts} IST",
             f"🎯 <b>Holding Window:</b> 09:42 AM ➔ 14:45 PM (Fixed 1-Lot Budget)",
-            f"🛡️ <b>Risk Protection:</b> Tick-by-Tick 3.0% Stop Loss Monitored",
+            f"🛡️ <b>Risk Protection:</b> Tick-by-Tick 2.25% Stop Loss Monitored",
             "",
             "<b>📋 EXECUTED TRADES (FUTURES vs CASH EQUITY):</b>"
         ]

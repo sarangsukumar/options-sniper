@@ -43,6 +43,7 @@ PRED_CSV = os.path.join(SCRIPT_DIR, 'live_predictions_today.csv')
 LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0940_live_ledger.csv')
 AUDIT_CSV = os.path.join(BASE_DIR, 'audited_0940_hybrid_trades.csv')
 SARANG_DIR = BASE_DIR
+CAPITAL_PER_TRADE = 750000.0  # ₹7.5 Lakhs per trade allocation
 
 # 12 Verified Rebound-Aware & Momentum Acceleration Features from Audited Model
 PURE_DB_FEATURES = [
@@ -546,7 +547,7 @@ def train_and_predict_single(df_today):
                 'stock': row['clean_stock'],
                 'model_rank': idx + 1,
                 'entry': float(row['entry_price_0940']),
-                'qty': int(500000.0 / float(row['entry_price_0940'])),
+                'qty': int(CAPITAL_PER_TRADE / float(row['entry_price_0940'])),
                 'reason': reason
             })
             print(f"      ⛔ SKIPPED  Rank {idx + 1}: {row['clean_stock']:12} | stock%: {row['stock_pct_940']:+.2f}% | Reason: {reason}")
@@ -623,7 +624,7 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
     lines = [
         f"📉 <b>HYBRID SHORT SELL ORDERS ({target_date_str} - {day_name})</b>",
         f"⏰ <b>Entry:</b> 09:42:00 AM IST | <b>Exit:</b> 14:45:00 PM IST",
-        f"🛡️ <b>Stop Loss:</b> 2.25% (Tick-by-Tick) | <b>Budget:</b> Fixed ₹5L per Trade",
+        f"🛡️ <b>Stop Loss:</b> 2.25% (Tick-by-Tick) | <b>Budget:</b> Fixed ₹7.5L per Trade",
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
@@ -639,10 +640,10 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
         stock = row['clean_stock']
         entry = float(row['entry_price_0940'])
         sl    = entry * 1.0225
-        qty   = int(row.get('total_quantity', int(500000.0 / entry)))
+        qty   = int(row.get('total_quantity', int(CAPITAL_PER_TRADE / entry)))
         sig   = row.get('signal_type', 'TOP 4')
         lines.append(f"✅ <b>{stock}</b>  <i>({sig})</i>")
-        lines.append(f"  • <b>Action:</b> SHORT SELL {qty} QTY (₹5L Notional)")
+        lines.append(f"  • <b>Action:</b> SHORT SELL {qty} QTY (₹7.5L Notional)")
         lines.append(f"  • <b>Entry:</b> ₹{entry:,.2f}  |  <b>SL:</b> ₹{sl:,.2f}")
         lines.append(f"------------------------------------")
 
@@ -653,7 +654,7 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
             qty   = b.get('qty', 0)
             sl    = entry * 1.0225 if entry else 0
             lines.append(f"⛔ <b>{b['stock']}</b>  <i>(SKIPPED)</i>")
-            lines.append(f"  • <b>Would have been:</b> SHORT SELL {qty} QTY (₹5L Notional)")
+            lines.append(f"  • <b>Would have been:</b> SHORT SELL {qty} QTY (₹7.5L Notional)")
             lines.append(f"  • <b>Price:</b> ₹{entry:,.2f}  |  <b>SL:</b> ₹{sl:,.2f}")
             lines.append(f"  • <b>Reason:</b> {b['reason']}")
             lines.append(f"------------------------------------")
@@ -729,7 +730,7 @@ def main():
     print(f"🏆 4-LOT LIVE SHORT SELL PLAN FOR {target_date_str} (TOTAL LOTS: 4 | ENTRY 09:42 AM)")
     print("="*83)
 
-    df_plan['total_quantity'] = df_plan.apply(lambda x: int(500000.0 / x['entry_price_0940']), axis=1)
+    df_plan['total_quantity'] = df_plan.apply(lambda x: int(CAPITAL_PER_TRADE / x['entry_price_0940']), axis=1)
     df_plan['stop_loss_2_25pct'] = df_plan['entry_price_0940'] * 1.0225
 
     print(df_plan[['clean_stock', 'signal_type', 'lots_to_trade', 'total_quantity', 'entry_price_0940', 'stop_loss_2_25pct']])

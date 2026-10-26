@@ -35,7 +35,7 @@ existing_cols = [c for c in features_huber if c in df.columns]
 if 'target_return' in df.columns:
     df['target'] = df['target_return']
 elif 'net_pnl' in df.columns:
-    df['target'] = df['net_pnl'] / 500000.0  # Normalized return target
+    df['target'] = df['net_pnl'] / 750000.0  # Normalized return target (7.5L capital)
 
 df[existing_cols] = df[existing_cols].fillna(0)
 df['target'] = df['target'].fillna(0)

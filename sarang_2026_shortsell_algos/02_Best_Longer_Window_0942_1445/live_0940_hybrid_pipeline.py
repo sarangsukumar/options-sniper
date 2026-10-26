@@ -110,7 +110,7 @@ def get_exact_lotsize(stock, dt, lot_map, latest_lots, fallback_price=0.0):
     if stk in latest_lots:
         return int(latest_lots[stk])
     if fallback_price > 0:
-        return max(1, int(500000.0 / fallback_price))
+        return max(1, int(750000.0 / fallback_price))
     return 500
 
 
@@ -717,7 +717,7 @@ def main():
     print(f"🎯 09:40 HYBRID MODEL V6+V7 TOP PICKS FOR {target_date_str} ({today_dt.day_name()}):")
     print("=" * 95)
 
-    TARGET_CAPITAL_PER_STOCK = 500000.0  # ₹5 Lakhs Flat Position Value per stock
+    TARGET_CAPITAL_PER_STOCK = 750000.0  # ₹7.5 Lakhs Flat Position Value per stock
 
     for rank, p in enumerate(top_picks, start=1):
         clean = p['clean_stock']
