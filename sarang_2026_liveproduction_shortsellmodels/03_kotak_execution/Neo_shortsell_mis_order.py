@@ -1192,8 +1192,22 @@ def _run_position_based_squareoff(model_name, today, exit_window):
         conn.close()
 
         if not db_model_stocks:
-            log_print(f"ℹ️  DB shows no trades for {model_name} today. Nothing to manage.")
-            break
+            # Fallback: check shortsell_orders directly
+            conn = get_db_connection()
+            with conn.cursor() as c:
+                c.execute("""
+                    SELECT id, stockname, IFNULL(filled_price, limit_price) as sell_price 
+                    FROM shortsell_orders 
+                    WHERE trade_date = %s AND model_name = %s AND isvalid IN ('1.5', '2', 'TRUE')
+                """, (today, model_name))
+                for row in c.fetchall():
+                    db_model_stocks[row['stockname']] = row
+            conn.close()
+            if db_model_stocks:
+                log_print(f"  ℹ️ Found {len(db_model_stocks)} trades for {model_name} in shortsell_orders (fallback).")
+            else:
+                log_print(f"ℹ️  DB shows no trades for {model_name} today. Nothing to manage.")
+                break
 
         # 2. Get Live Kotak State
         active_shorts = get_active_mis_short_positions(client)
