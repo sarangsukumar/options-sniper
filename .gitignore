@@ -31,6 +31,8 @@ historical_models/output/*.pdf
 # Ignore local temporary/log files and scripts
 *.log
 *.txt
+!*lgb*.txt
+*.pkl
 scratch/
 check_daily_quarters.py
 find_winner.py

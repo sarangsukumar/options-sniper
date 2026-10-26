@@ -64,6 +64,136 @@ def send_telegram_alert(msg):
     else:
         print("ℹ️ Telegram bot script not found; notification skipped.")
 
+def simulate_scalp(ticks, qty, date_str):
+    """
+    Simulates the 50/50 Split Execution Strategy for 0920_SCALP:
+      - Leg 1 (50% qty): Passive resting Limit TP order on book at entry - (2000.0 / total_qty).
+      - Leg 2 (50% qty): Evaluated at 30s cadence (09:36:00 to 09:39:30) for profit >= ₹500, else 09:40 exit.
+      - Base Stop Loss: ₹3,000 risk or 0.60% adverse move.
+    """
+    if not ticks:
+        return None
+
+    entry_p = float(ticks[0]['price'])
+    entry_t = str(ticks[0]['time']).split()[-1]
+    
+    q1 = qty // 2
+    if q1 <= 0: q1 = 1
+    q2 = qty - q1
+
+    # Leg 1 TP: ₹2,000 profit
+    tp1_target = 2000.0
+    tp1_price = round(entry_p - (tp1_target / qty), 2)
+    # Base SL: ₹3,000 risk or 0.60% adverse move
+    sl_p = min(round(entry_p + (3000.0 / qty), 2), round(entry_p * 1.006, 2))
+
+    leg1_filled = False
+    leg1_p = None
+    leg1_t = None
+    leg1_reason = None
+
+    leg2_filled = False
+    leg2_p = None
+    leg2_t = None
+    leg2_reason = None
+
+    for t in ticks:
+        t_time = str(t['time'])
+        p = float(t['price'])
+        h = float(t.get('high') or p)
+        l = float(t.get('low') or p)
+
+        # 1. Base Stop loss check
+        if h >= sl_p:
+            if not leg1_filled:
+                leg1_filled = True
+                leg1_p = sl_p
+                leg1_t = t_time.split()[-1]
+                leg1_reason = 'STOP_LOSS_3000'
+            if not leg2_filled:
+                leg2_filled = True
+                leg2_p = sl_p
+                leg2_t = t_time.split()[-1]
+                leg2_reason = 'STOP_LOSS_3000'
+            break
+
+        # 2. Leg 1 Resting Take Profit check (₹2,000 profit)
+        if not leg1_filled and l <= tp1_price:
+            leg1_filled = True
+            leg1_p = tp1_price
+            leg1_t = t_time.split()[-1]
+            leg1_reason = 'LEG1_TP_2000'
+
+        # 3. Leg 2 / Remaining Trailing profit exit between 09:36:00 and 09:39:30
+        if f"{date_str} 09:36:00" <= t_time <= f"{date_str} 09:39:30":
+            if leg1_filled and not leg2_filled:
+                if (entry_p - p) * q2 >= 500.0:
+                    leg2_filled = True
+                    leg2_p = p
+                    leg2_t = t_time.split()[-1]
+                    leg2_reason = f'LEG2_CADENCE_{leg2_t[:5]}'
+                    break
+            elif not leg1_filled and not leg2_filled:
+                if (entry_p - p) * qty >= 500.0:
+                    leg1_filled = True
+                    leg1_p = p
+                    leg1_t = t_time.split()[-1]
+                    leg1_reason = f'CADENCE_{leg1_t[:5]}'
+                    leg2_filled = True
+                    leg2_p = p
+                    leg2_t = t_time.split()[-1]
+                    leg2_reason = f'CADENCE_{leg2_t[:5]}'
+                    break
+
+        # 4. Hard Square-off at 09:40:00
+        if t_time >= f"{date_str} 09:40:00":
+            if not leg1_filled:
+                leg1_filled = True
+                leg1_p = p
+                leg1_t = t_time.split()[-1]
+                leg1_reason = 'TIME_EXIT_0940'
+            if not leg2_filled:
+                leg2_filled = True
+                leg2_p = p
+                leg2_t = t_time.split()[-1]
+                leg2_reason = 'TIME_EXIT_0940'
+            break
+
+    # Fallback to last tick if not filled
+    if not leg1_filled or not leg2_filled:
+        last_p = float(ticks[-1]['price'])
+        last_t = str(ticks[-1]['time']).split()[-1]
+        if not leg1_filled:
+            leg1_filled = True
+            leg1_p = last_p
+            leg1_t = last_t
+            leg1_reason = 'TIME_EXIT_0940'
+        if not leg2_filled:
+            leg2_filled = True
+            leg2_p = last_p
+            leg2_t = last_t
+            leg2_reason = 'TIME_EXIT_0940'
+
+    gross = round((entry_p - leg1_p) * q1 + (entry_p - leg2_p) * q2, 2)
+    taxes = round(get_taxes(q1, entry_p, leg1_p) + get_taxes(q2, entry_p, leg2_p), 2)
+    net = round(gross - taxes, 2)
+    avg_exit_p = round((leg1_p * q1 + leg2_p * q2) / qty, 2)
+    ret_pct = round(((entry_p - avg_exit_p) / entry_p) * 100.0, 2) if entry_p > 0 else 0.0
+    exit_t = max(leg1_t, leg2_t) if leg1_t and leg2_t else (leg1_t or leg2_t)
+    exit_reason = f"{leg1_reason} + {leg2_reason}" if leg1_reason != leg2_reason else leg1_reason
+
+    return {
+        'entry_price': round(entry_p, 2),
+        'entry_time': entry_t,
+        'exit_price': avg_exit_p,
+        'exit_time': exit_t,
+        'exit_reason': exit_reason,
+        'gross_pnl': gross,
+        'net_pnl': net,
+        'return_pct': ret_pct,
+        'taxes': taxes
+    }
+
 def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False):
     if not os.path.exists(LEDGER_CSV):
         print(f"❌ Error: Ledger file not found at {LEDGER_CSV}")
@@ -98,90 +228,78 @@ def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False)
             row = df_ledger.loc[idx]
             d = str(row['date'])
             s = str(row['stockname']).strip().upper()
-            lotsize = int(row['lotsize'])
+            raw_lotsize = row.get('lotsize')
+            if pd.isna(raw_lotsize) or raw_lotsize is None:
+                raw_lotsize = row.get('qty', 1)
+            try:
+                lotsize = int(float(raw_lotsize))
+            except Exception:
+                lotsize = 1
 
-            # 1. Fetch Futures (scrapdata_F1) Entry & Exit
+            # 1. Fetch Futures (scrapdata_F1) ticks from 09:25:00 to 09:42:00
             cursor.execute(f"""
-                SELECT price FROM scrapdata_F1 
-                WHERE date = '{d}' AND stockname = '{s}' AND time >= '{d} 09:21:00' 
-                ORDER BY time ASC LIMIT 1
+                SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
+                FROM scrapdata_F1 
+                WHERE date = '{d}' AND stockname = '{s}' 
+                  AND time >= '{d} 09:25:00' AND time <= '{d} 09:42:00'
+                  AND (isvalid = 'TRUE' OR isvalid IS NULL OR isvalid = '1' OR isvalid = '')
+                ORDER BY time ASC
             """)
-            res_entry_f1 = cursor.fetchone()
+            ticks_f1 = cursor.fetchall()
 
+            # 2. Fetch Cash Equity (scrapdata) ticks from 09:25:00 to 09:42:00
             cursor.execute(f"""
-                SELECT price FROM scrapdata_F1 
-                WHERE date = '{d}' AND stockname = '{s}' AND time >= '{d} 09:41:00' 
-                ORDER BY time ASC LIMIT 1
+                SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
+                FROM scrapdata 
+                WHERE date = '{d}' AND stockname = '{s}' 
+                  AND time >= '{d} 09:25:00' AND time <= '{d} 09:42:00'
+                  AND (isvalid = 'TRUE' OR isvalid IS NULL OR isvalid = '1' OR isvalid = '')
+                ORDER BY time ASC
             """)
-            res_exit_f1 = cursor.fetchone()
+            ticks_eq = cursor.fetchall()
 
-            # 2. Fetch Cash Equity (scrapdata) Entry & Exit
-            cursor.execute(f"""
-                SELECT price FROM scrapdata 
-                WHERE date = '{d}' AND stockname = '{s}' AND time >= '{d} 09:21:00' 
-                ORDER BY time ASC LIMIT 1
-            """)
-            res_entry_eq = cursor.fetchone()
+            res_f1 = simulate_scalp(ticks_f1, lotsize, d) if ticks_f1 else None
+            res_eq = simulate_scalp(ticks_eq, lotsize, d) if ticks_eq else None
 
-            cursor.execute(f"""
-                SELECT price FROM scrapdata 
-                WHERE date = '{d}' AND stockname = '{s}' AND time >= '{d} 09:41:00' 
-                ORDER BY time ASC LIMIT 1
-            """)
-            res_exit_eq = cursor.fetchone()
-
-            has_f1 = (res_entry_f1 and res_exit_f1 and res_entry_f1['price'] is not None and res_exit_f1['price'] is not None)
-            has_eq = (res_entry_eq and res_exit_eq and res_entry_eq['price'] is not None and res_exit_eq['price'] is not None)
-
-            if not has_f1 and not has_eq:
+            if not res_f1 and not res_eq:
                 print(f"⚠️ {d} | {s}: Incomplete market data in both scrapdata and scrapdata_F1. Remains PENDING.")
                 continue
 
-            # Calculate Futures metrics
-            if has_f1:
-                p_entry_f1 = float(res_entry_f1['price'])
-                p_exit_f1 = float(res_exit_f1['price'])
-                gross_f1 = (p_entry_f1 - p_exit_f1) * lotsize
-                net_f1 = gross_f1 - get_taxes(lotsize, p_entry_f1, p_exit_f1)
-                ret_pct_f1 = ((p_entry_f1 - p_exit_f1) / p_entry_f1) * 100.0
-
-                df_ledger.at[idx, 'f1_entry_price'] = round(p_entry_f1, 2)
-                df_ledger.at[idx, 'f1_exit_price'] = round(p_exit_f1, 2)
-                df_ledger.at[idx, 'f1_gross_pnl'] = round(gross_f1, 2)
-                df_ledger.at[idx, 'f1_net_pnl'] = round(net_f1, 2)
-                df_ledger.at[idx, 'f1_return_pct'] = round(ret_pct_f1, 2)
+            # Populate Futures fields
+            if res_f1:
+                df_ledger.at[idx, 'f1_entry_price'] = res_f1['entry_price']
+                df_ledger.at[idx, 'f1_exit_price'] = res_f1['exit_price']
+                df_ledger.at[idx, 'f1_gross_pnl'] = res_f1['gross_pnl']
+                df_ledger.at[idx, 'f1_net_pnl'] = res_f1['net_pnl']
+                df_ledger.at[idx, 'f1_return_pct'] = res_f1['return_pct']
             else:
-                p_entry_f1, p_exit_f1, gross_f1, net_f1, ret_pct_f1 = None, None, None, None, None
+                for col in ['f1_entry_price', 'f1_exit_price', 'f1_gross_pnl', 'f1_net_pnl', 'f1_return_pct']:
+                    df_ledger.at[idx, col] = np.nan
 
-            # Calculate Cash Equity metrics
-            if has_eq:
-                p_entry_eq = float(res_entry_eq['price'])
-                p_exit_eq = float(res_exit_eq['price'])
-                gross_eq = (p_entry_eq - p_exit_eq) * lotsize
-                net_eq = gross_eq - get_taxes(lotsize, p_entry_eq, p_exit_eq)
-                ret_pct_eq = ((p_entry_eq - p_exit_eq) / p_entry_eq) * 100.0
-
-                df_ledger.at[idx, 'eq_entry_price'] = round(p_entry_eq, 2)
-                df_ledger.at[idx, 'eq_exit_price'] = round(p_exit_eq, 2)
-                df_ledger.at[idx, 'eq_gross_pnl'] = round(gross_eq, 2)
-                df_ledger.at[idx, 'eq_net_pnl'] = round(net_eq, 2)
-                df_ledger.at[idx, 'eq_return_pct'] = round(ret_pct_eq, 2)
+            # Populate Cash Equity fields
+            if res_eq:
+                df_ledger.at[idx, 'eq_entry_price'] = res_eq['entry_price']
+                df_ledger.at[idx, 'eq_exit_price'] = res_eq['exit_price']
+                df_ledger.at[idx, 'eq_gross_pnl'] = res_eq['gross_pnl']
+                df_ledger.at[idx, 'eq_net_pnl'] = res_eq['net_pnl']
+                df_ledger.at[idx, 'eq_return_pct'] = res_eq['return_pct']
             else:
-                p_entry_eq, p_exit_eq, gross_eq, net_eq, ret_pct_eq = None, None, None, None, None
+                for col in ['eq_entry_price', 'eq_exit_price', 'eq_gross_pnl', 'eq_net_pnl', 'eq_return_pct']:
+                    df_ledger.at[idx, col] = np.nan
 
-            # Primary ledger fields (prioritize Futures if available, otherwise Equity)
-            primary_ep = p_entry_f1 if has_f1 else p_entry_eq
-            primary_xp = p_exit_f1 if has_f1 else p_exit_eq
-            primary_gross = gross_f1 if has_f1 else gross_eq
-            primary_net = net_f1 if has_f1 else net_eq
-            primary_ret = ret_pct_f1 if has_f1 else ret_pct_eq
+            # Primary ledger fields (prioritize Futures if available, otherwise Cash Equity)
+            primary = res_f1 if res_f1 else res_eq
 
-            df_ledger.at[idx, 'entry_price'] = round(primary_ep, 2)
-            df_ledger.at[idx, 'exit_price'] = round(primary_xp, 2)
-            df_ledger.at[idx, 'gross_pnl'] = round(primary_gross, 2)
-            df_ledger.at[idx, 'charges'] = 300.0
-            df_ledger.at[idx, 'net_pnl'] = round(primary_net, 2)
-            df_ledger.at[idx, 'return_pct'] = round(primary_ret, 2)
+            df_ledger.at[idx, 'entry_price'] = primary['entry_price']
+            df_ledger.at[idx, 'exit_price'] = primary['exit_price']
+            df_ledger.at[idx, 'entry_time'] = primary['entry_time']
+            df_ledger.at[idx, 'exit_time'] = primary['exit_time']
+            df_ledger.at[idx, 'exit_reason'] = primary['exit_reason']
+            df_ledger.at[idx, 'gross_pnl'] = primary['gross_pnl']
+            df_ledger.at[idx, 'charges'] = primary['taxes']
+            df_ledger.at[idx, 'net_pnl'] = primary['net_pnl']
+            df_ledger.at[idx, 'return_pct'] = primary['return_pct']
+            df_ledger.at[idx, 'is_win'] = 1 if primary['net_pnl'] > 0 else 0
             df_ledger.at[idx, 'status'] = 'COMPLETED'
             df_ledger.at[idx, 'reconciled_at'] = now_ts
 
@@ -200,57 +318,91 @@ def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False)
         if day_df.empty:
             continue
 
-        day_gross_f1 = day_df['f1_gross_pnl'].dropna().sum() if 'f1_gross_pnl' in day_df else day_df['gross_pnl'].sum()
-        day_net_f1 = day_df['f1_net_pnl'].dropna().sum() if 'f1_net_pnl' in day_df else day_df['net_pnl'].sum()
-        day_net_eq = day_df['eq_net_pnl'].dropna().sum() if 'eq_net_pnl' in day_df else 0.0
+        has_f1 = 'f1_net_pnl' in day_df and day_df['f1_net_pnl'].notna().any()
+        day_gross_f1 = day_df['f1_gross_pnl'].dropna().sum() if has_f1 else 0.0
+        day_net_f1 = day_df['f1_net_pnl'].dropna().sum() if has_f1 else 0.0
+        day_net_eq = day_df['eq_net_pnl'].dropna().sum() if ('eq_net_pnl' in day_df and day_df['eq_net_pnl'].notna().any()) else day_df['net_pnl'].dropna().sum()
 
-        wins_f1 = (day_df['net_pnl'] > 0).sum()
-        losses_f1 = (day_df['net_pnl'] <= 0).sum()
-        win_rate_f1 = (wins_f1 / len(day_df)) * 100.0 if len(day_df) > 0 else 0.0
+        wins = (day_df['net_pnl'] > 0).sum()
+        win_rate = (wins / len(day_df)) * 100.0 if len(day_df) > 0 else 0.0
 
-        pnl_color = "🟢" if day_net_f1 >= 0 else "🔴"
+        target_net = day_net_f1 if has_f1 else day_net_eq
+        pnl_color = "🟢" if target_net >= 0 else "🔴"
 
         print("\n" + "=" * 100)
-        print(f"📊 09:20 SCALP RECONCILED PNL REPORT: {d} (FUTURES & CASH EQUITY)")
+        mode_title = "FUTURES & CASH EQUITY" if has_f1 else "CASH EQUITY"
+        print(f"📊 09:20 SCALP RECONCILED PNL REPORT: {d} ({mode_title})")
         print("=" * 100)
-        print(f"{'#':<3} | {'Stock':<10} | {'F1 Net (₹)':<12} | {'F1 Ret %':<9} | {'EQ Net (₹)':<12} | {'EQ Ret %':<9}")
-        print("-" * 100)
-        for _, r in day_df.iterrows():
-            stk = r['stockname']
-            f1_n = r.get('f1_net_pnl', r.get('net_pnl', 0.0))
-            f1_r = r.get('f1_return_pct', r.get('return_pct', 0.0))
-            eq_n = r.get('eq_net_pnl', 0.0)
-            eq_r = r.get('eq_return_pct', 0.0)
-            print(f"{int(r['rank']):<3} | {stk:<10} | {f1_n:>10,.2f}   | {f1_r:>7.2f}%  | {eq_n:>10,.2f}   | {eq_r:>7.2f}%")
-        print("-" * 100)
-        print(f"SUMMARY: Futures Net PnL = ₹{day_net_f1:,.2f} | Equity Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate_f1:.1f}%")
+        if has_f1:
+            print(f"{'#':<3} | {'Stock':<10} | {'F1 Net (₹)':<12} | {'F1 Ret %':<9} | {'EQ Net (₹)':<12} | {'EQ Ret %':<9} | {'Exit Reason':<22} | {'Exit Time':<8}")
+            print("-" * 100)
+            for _, r in day_df.iterrows():
+                stk = r['stockname']
+                f1_n = r.get('f1_net_pnl', 0.0)
+                f1_r = r.get('f1_return_pct', 0.0)
+                eq_n = r.get('eq_net_pnl', r.get('net_pnl', 0.0))
+                eq_r = r.get('eq_return_pct', r.get('return_pct', 0.0))
+                reason = str(r.get('exit_reason', '-'))
+                ex_t = str(r.get('exit_time', '-'))
+                print(f"{int(r['rank']):<3} | {stk:<10} | {f1_n:>10,.2f}   | {f1_r:>7.2f}%  | {eq_n:>10,.2f}   | {eq_r:>7.2f}%  | {reason:<22} | {ex_t:<8}")
+            print("-" * 100)
+            print(f"SUMMARY: Futures Net PnL = ₹{day_net_f1:,.2f} | Equity Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate:.1f}%")
+        else:
+            print(f"{'#':<3} | {'Stock':<10} | {'Net PnL (₹)':<12} | {'Return %':<9} | {'Exit Reason':<24} | {'Exit Time':<8}")
+            print("-" * 100)
+            for _, r in day_df.iterrows():
+                stk = r['stockname']
+                net_val = r.get('net_pnl', 0.0)
+                ret_val = r.get('return_pct', 0.0)
+                reason = str(r.get('exit_reason', '-'))
+                ex_t = str(r.get('exit_time', '-'))
+                print(f"{int(r['rank']):<3} | {stk:<10} | {net_val:>10,.2f}   | {ret_val:>7.2f}%  | {reason:<24} | {ex_t:<8}")
+            print("-" * 100)
+            print(f"SUMMARY: Total Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate:.1f}%")
         print("=" * 100)
 
         # Telegram Message
+        tg_header = "[09:20 SCALP: DUAL RECONCILED PNL REPORT]" if has_f1 else "[09:20 SCALP: RECONCILED PNL REPORT]"
         tg_lines = [
-            f"{pnl_color} <b>[09:20 SCALP: DUAL RECONCILED PNL REPORT]</b>",
+            f"{pnl_color} <b>{tg_header}</b>",
             f"📅 <b>Date:</b> {d} | ⏱️ <b>Audit Time:</b> {now_ts} IST",
-            f"🎯 <b>Holding Window:</b> 09:21 AM ➔ 09:41 AM (Strict 20-Min Scalp)",
+            f"🎯 <b>Holding Window:</b> 09:25 Entry ➔ 0.05% Trailing Profit (09:36–09:39) / 09:40 Square-Off",
             "",
-            "<b>📋 EXECUTED TRADES (FUTURES vs CASH EQUITY):</b>"
+            "<b>📋 EXECUTED TRADES:</b>"
         ]
         for _, r in day_df.iterrows():
             t_icon = "✅" if r['net_pnl'] > 0 else "❌"
-            f1_n = r.get('f1_net_pnl', r.get('net_pnl', 0.0))
-            f1_r = r.get('f1_return_pct', r.get('return_pct', 0.0))
-            eq_n = r.get('eq_net_pnl', 0.0)
-            eq_r = r.get('eq_return_pct', 0.0)
-            tg_lines.append(
-                f"  {t_icon} <b>#{int(r['rank'])} {r['stockname']}</b> (Lot {int(r['lotsize'])}):"
-                f"\n      • <b>F1:</b> Net <b>₹{f1_n:+,.2f}</b> ({f1_r:+.2f}%)"
-                f"\n      • <b>EQ:</b> Net <b>₹{eq_n:+,.2f}</b> ({eq_r:+.2f}%)"
-            )
-        tg_lines.extend([
-            "",
-            f"⚡ <b>Statutory Charges:</b> -₹{len(day_df)*300:,.2f} (₹300/trade)",
-            f"🏆 <b>TOTAL FUTURES NET PNL:</b> <b>₹{day_net_f1:+,.2f}</b> ({win_rate_f1:.1f}% Win Rate)",
-            f"📊 <b>TOTAL EQUITY NET PNL:</b> <b>₹{day_net_eq:+,.2f}</b>"
-        ])
+            lot_display = int(r['lotsize']) if pd.notna(r.get('lotsize')) else int(r.get('qty', 1)) if pd.notna(r.get('qty')) else 1
+            reason = str(r.get('exit_reason', ''))
+            reason_str = f" [{reason}]" if reason and reason != 'nan' else ""
+            if has_f1:
+                f1_n = r.get('f1_net_pnl', 0.0)
+                f1_r = r.get('f1_return_pct', 0.0)
+                eq_n = r.get('eq_net_pnl', r.get('net_pnl', 0.0))
+                eq_r = r.get('eq_return_pct', r.get('return_pct', 0.0))
+                tg_lines.append(
+                    f"  {t_icon} <b>#{int(r['rank'])} {r['stockname']}</b> (Qty {lot_display}{reason_str}):"
+                    f"\n      • <b>F1:</b> Net <b>₹{f1_n:+,.2f}</b> ({f1_r:+.2f}%)"
+                    f"\n      • <b>EQ:</b> Net <b>₹{eq_n:+,.2f}</b> ({eq_r:+.2f}%)"
+                )
+            else:
+                net_val = r.get('net_pnl', 0.0)
+                ret_val = r.get('return_pct', 0.0)
+                tg_lines.append(
+                    f"  {t_icon} <b>#{int(r['rank'])} {r['stockname']}</b> (Qty {lot_display}{reason_str}):"
+                    f"\n      • Net: <b>₹{net_val:+,.2f}</b> ({ret_val:+.2f}%)"
+                )
+        total_charges = day_df['charges'].sum() if 'charges' in day_df and day_df['charges'].notna().any() else len(day_df) * 300.0
+        tg_lines.append("")
+        tg_lines.append(f"⚡ <b>Statutory Charges:</b> -₹{total_charges:,.2f}")
+        if has_f1:
+            tg_lines.extend([
+                f"🏆 <b>TOTAL FUTURES NET PNL:</b> <b>₹{day_net_f1:+,.2f}</b> ({win_rate:.1f}% Win Rate)",
+                f"📊 <b>TOTAL EQUITY NET PNL:</b> <b>₹{day_net_eq:+,.2f}</b>"
+            ])
+        else:
+            tg_lines.append(f"🏆 <b>TOTAL NET PNL:</b> <b>₹{day_net_eq:+,.2f}</b> ({win_rate:.1f}% Win Rate)")
+
         if not no_telegram:
             send_telegram_alert("\n".join(tg_lines))
 

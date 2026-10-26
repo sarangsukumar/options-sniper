@@ -1,0 +1,8 @@
+Model,Win_Rate,Total_Net_PnL_Lakhs,Avg_Trade_Rs,Profit_Factor,Max_DD_Lakhs,Trades_>=_₹3K,Trades_>=_₹5K,Trades_>=_₹10K,2024_2026_PnL_Lakhs,2024_2026_Win_Rate
+"Baseline: Capped Model 2 (Cap ₹1,750, 09:40 Exit)",82.68%,28.28,493.3,2.52,-0.25,0,0,0,9.96,80.71%
+Runner A: Uncapped Morning Trail ₹250 (09:40 Exit),82.68%,31.14,543.1,2.67,-0.26,91,14,0,10.33,80.71%
+Runner B: Uncapped Morning Trail ₹350 (09:40 Exit),82.68%,26.93,469.7,2.45,-0.3,83,12,0,8.71,80.71%
+Runner C: Uncapped Morning Tiered Chandelier (09:40 Exit),82.68%,30.29,528.2,2.63,-0.26,69,9,0,10.12,80.71%
+Runner D: Extended Day Trail ₹350 (14:45 EOD),88.61%,27.93,487.1,2.34,-0.27,84,12,0,9.46,88.27%
+Runner E: Extended Day Trail ₹500 (14:45 EOD),88.61%,21.66,377.8,2.04,-0.28,73,11,0,7.1,88.27%
+Runner F: Extended Day Tiered Chandelier (14:45 EOD) 🚀,88.61%,31.75,553.7,2.53,-0.25,70,9,0,11.11,88.27%

@@ -1,0 +1,7 @@
+Model,Win_Rate,Profit_Exit_Rate,Time_Exit_Rate,SL_Rate,Total_Net_PnL_Lakhs,Profit_Factor,Max_DD_Lakhs,Avg_Trade_Rs,2024_2026_PnL_Lakhs,2024_2026_Win_Rate
+Baseline: Fixed ₹1500 TP (No Trail),76.42%,67.89%,22.81%,9.30%,27.1,2.09,-0.37,472.6,10.24,74.12%
+"Model 1: Act ₹1000 -> Trail ₹250, MinLock ₹750, Cap ₹1500",82.70%,80.01%,13.03%,6.96%,24.78,2.33,-0.27,432.2,8.68,80.75%
+"Model 2: Act ₹1000 -> Trail ₹200, MinLock ₹800, Cap ₹1750",82.70%,80.03%,13.01%,6.96%,28.3,2.52,-0.25,493.5,9.96,80.75%
+"Model 3: Act ₹1000 -> Trail ₹300, MinLock ₹700, Runner to ₹2000",82.70%,79.96%,13.08%,6.96%,25.9,2.39,-0.28,451.7,8.78,80.75%
+"Model 4: Step-Lock (₹1000->Lock ₹500, ₹1250->Lock ₹1000, TP ₹1500)",82.70%,79.49%,13.55%,6.96%,19.45,2.04,-0.35,339.2,6.48,80.75%
+Model 5: Act ₹1000 -> Reversal Candle Exit (or Cap ₹1500),71.42%,79.07%,13.90%,7.03%,20.34,1.95,-0.32,354.8,7.28,70.07%

@@ -79,10 +79,21 @@ VALID_STOCKS = [
     'UPL', 'VEDL', 'VOLTAS', 'WIPRO', 'ZEEL', 'ZYDUSLIFE'
 ]
 
-# ─── 13 Features (must match 1_build_features_and_train.py exactly) ─────────────
+# ─── 13 Features (matches 02_train_and_audit_0920.py / lgb_0920_scalp_model.txt exactly) ──
 FEATURES_920 = [
-    'prev_intraday_vwap_gap', 'prev_intraday_roc_last_hour', 'prev_intraday_return',
-    'positive_arc_ratio', 'Gap_Pct', 'gap_0907_pct', 'morn_range_pct', 'rejection_wick'
+    'morn_range_pct',
+    'prev_intraday_vwap_gap',
+    'prev_intraday_roc_last_hour',
+    'prev_intraday_return',
+    'positive_arc_ratio',
+    'Gap_Pct',
+    'gap_0907_pct',
+    'rejection_wick',
+    'nifty_gap',
+    'sp500_overnight_ret',
+    'nikkei_gap',
+    'nifty_vs_sp500_gap',
+    'nifty_vs_nikkei_gap'
 ]
 
 # ─── DB Connection ───────────────────────────────────────────────────────────────
@@ -226,103 +237,130 @@ def extract_today_features(today_str, prev_date_str):
     return df
 
 
-# ─── Step 2: Fetch macro features from yfinance ────────────────────────────────────
-def fetch_macro_for_date(today_str):
+# ─── Step 2: Fetch macro features from yfinance + MySQL ───────────────────────────
+def fetch_macro_for_date(today_str, prev_date_str=None):
     """
-    Fetch Nifty/SP500/Nikkei gaps for today_str.
-    Exact logic from 1_build_features_and_train.py.
+    Fetch overnight macro features (Nifty, S&P 500, Nikkei 225) matching 02_train_and_audit_0920.py.
+    Calculates:
+      - nifty_gap: (nifty_open / nifty_close_prev) - 1
+      - sp500_overnight_ret: (sp500_close_yesterday / sp500_close_day_before) - 1
+      - nikkei_gap: (nikkei_open / nikkei_close_prev) - 1
+      - nifty_vs_sp500_gap: nifty_gap - sp500_overnight_ret
+      - nifty_vs_nikkei_gap: nifty_gap - nikkei_gap
     """
-    print("📡 Fetching macro data from Yahoo Finance...")
-    tickers = {'NIFTY': '^NSEI', 'SP500': '^GSPC', 'NIKKEI': '^N225'}
-    today_dt = pd.Timestamp(today_str)
-    start    = (today_dt - pd.Timedelta(days=10)).strftime('%Y-%m-%d')
-    end      = (today_dt + pd.Timedelta(days=2)).strftime('%Y-%m-%d')
+    print(f"📡 Fetching overnight global macro features for {today_str}...")
+    macro = {
+        'nifty_gap': 0.0,
+        'sp500_overnight_ret': 0.0,
+        'nikkei_gap': 0.0,
+        'nifty_vs_sp500_gap': 0.0,
+        'nifty_vs_nikkei_gap': 0.0
+    }
+    try:
+        tickers = {'NIFTY': '^NSEI', 'SP500': '^GSPC', 'NIKKEI': '^N225'}
+        data = yf.download(list(tickers.values()), period='15d', progress=False)
+        if isinstance(data.columns, pd.MultiIndex):
+            df_close = data['Close']
+            df_open = data['Open']
+        else:
+            df_close = data[['^NSEI']]
+            df_open = data[['^NSEI']]
 
-# ─── Step 2: Fetch macro features from yfinance ────────────────────────────────────
-def fetch_macro_for_date(today_str):
-    """
-    Stub — macro is now computed inside select_top4 from the full historical time series.
-    Returns empty dict; select_top4 handles the actual macro lookup for today.
-    """
-    return {}   # macro built inside select_top4 to avoid duplicate downloads
+        # 1. SP500 overnight return: (close[t-1] / close[t-2]) - 1
+        sp_close = df_close['^GSPC'].dropna()
+        if len(sp_close) >= 2:
+            macro['sp500_overnight_ret'] = float((sp_close.iloc[-1] / sp_close.iloc[-2]) - 1)
+
+        # 2. Nikkei gap: (open[t] / close[t-1]) - 1
+        nikkei_open = df_open['^N225'].dropna()
+        nikkei_close = df_close['^N225'].dropna()
+        if len(nikkei_open) > 0 and len(nikkei_close) >= 2:
+            macro['nikkei_gap'] = float((nikkei_open.iloc[-1] / nikkei_close.iloc[-2]) - 1)
+
+        # 3. NIFTY gap: (open[t] / close[t-1]) - 1
+        nifty_open_val = None
+        nifty_prev_close = None
+
+        date_strs = df_open.index.strftime('%Y-%m-%d').tolist()
+        if today_str in date_strs:
+            idx = date_strs.index(today_str)
+            nifty_open_val = df_open['^NSEI'].iloc[idx]
+            if idx > 0:
+                nifty_prev_close = df_close['^NSEI'].iloc[idx - 1]
+
+        # If today's open is not yet populated in yfinance, query MySQL scrapdata
+        if pd.isna(nifty_open_val) or pd.isna(nifty_prev_close) or nifty_open_val is None:
+            conn = get_conn()
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT price FROM scrapdata WHERE stockname='NIFTY 50' AND date='{today_str}' AND TIME(time)>='09:07:00' ORDER BY time ASC LIMIT 1;")
+                r_o = cur.fetchone()
+                if r_o:
+                    nifty_open_val = float(r_o['price'])
+                p_date = prev_date_str
+                if not p_date:
+                    cur.execute(f"SELECT MAX(date) as pd FROM scrapdata WHERE date < '{today_str}'")
+                    p_row = cur.fetchone()
+                    if p_row and p_row['pd']:
+                        p_date = str(p_row['pd'])
+                if p_date:
+                    cur.execute(f"SELECT price FROM scrapdata WHERE stockname='NIFTY 50' AND date='{p_date}' AND TIME(time)>='15:25:00' ORDER BY time DESC LIMIT 1;")
+                    r_c = cur.fetchone()
+                    if r_c:
+                        nifty_prev_close = float(r_c['price'])
+            conn.close()
+
+        if nifty_open_val and nifty_prev_close and nifty_prev_close > 0 and not np.isnan(nifty_open_val):
+            macro['nifty_gap'] = float((nifty_open_val / nifty_prev_close) - 1)
+        else:
+            macro['nifty_gap'] = 0.0
+
+        macro['nifty_vs_sp500_gap'] = macro['nifty_gap'] - macro['sp500_overnight_ret']
+        macro['nifty_vs_nikkei_gap'] = macro['nifty_gap'] - macro['nikkei_gap']
+
+        for k in macro:
+            if np.isnan(macro[k]):
+                macro[k] = 0.0
+
+        print(f"   ✅ Global Macro Features: {macro}")
+    except Exception as e:
+        print(f"   ⚠️ Warning: Macro fetch failed ({e}). Defaulting to 0.0.")
+
+    return macro
 
 
-
-# ─── Step 3: Train live model + Score → Top 4 ────────────────────────────────────
+# ─── Step 3: Load Pre-Trained Model & Score → Top 4 ─────────────────────────────
 def select_top4(df_features, macro, today_str, dry_run=False):
     """
-    Train the current-year model on-the-fly from the historical dataset.
-    Matches 1_build_features_and_train.py EXACTLY:
-      - Download full Nifty/SP500/Nikkei macro time series from yfinance
-      - Merge per date into historical dataset (not as scalars)
-      - Train on all years < current_year (expanding window, last fold)
-      - Score today's stocks with today's macro
+    Load pre-trained production model weights (lgb_0920_scalp_model.txt)
+    and score candidate stocks using the exact 13 features.
     """
-    import datetime as dt_module
-    current_year = dt_module.date.today().year
-
-    print(f"\n🤖 Training live 8-feature model (train years < {current_year}) from historical dataset...")
-    if not os.path.exists(DATASET_FILE):
-        print(f"   ❌ Dataset not found: {DATASET_FILE}")
+    if not os.path.exists(MODEL_FILE):
+        print(f"   ❌ Pre-trained model file not found: {MODEL_FILE}")
         sys.exit(1)
 
-    # Load historical dataset — pure DB features, no macro
-    df_hist = pd.read_csv(DATASET_FILE, low_memory=False)
-    
-    # EXACT BACKTEST PARITY: Filter historical dataset to strict universe BEFORE training
-    valid_set = set([s.strip().upper() for s in VALID_STOCKS])
-    df_hist['clean_stock'] = df_hist['clean_stock'].astype(str).str.strip().str.upper()
-    df_hist = df_hist[df_hist['clean_stock'].isin(valid_set)].reset_index(drop=True)
+    print(f"\n🧠 Loading Pre-Trained 09:20 Production Model Weights:\n   • {MODEL_FILE}")
+    model = lgb.Booster(model_file=MODEL_FILE)
 
-    df_hist['year'] = pd.to_datetime(df_hist['short_date']).dt.year
-    df_hist[FEATURES_920] = df_hist[FEATURES_920].fillna(0)
-    df_hist['target'] = (df_hist['pnl_net'] > 0).astype(int)
+    # Attach macro features to df_features
+    for col in ['nifty_gap', 'sp500_overnight_ret', 'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap']:
+        df_features[col] = float(macro.get(col, 0.0))
 
+    df_features[FEATURES_920] = df_features[FEATURES_920].fillna(0.0)
 
-    params_920 = {
-        'objective': 'binary',
-        'metric': 'auc',
-        'boosting_type': 'gbdt',
-        'learning_rate': 0.03,
-        'max_depth': 4,
-        'num_leaves': 15,
-        'min_child_samples': 50,
-        'subsample': 0.8,
-        'colsample_bytree': 0.8,
-        'verbose': -1,
-        'random_state': 42
-    }
-
-    # Train on all history before current_year (same as walk-forward last fold)
-    tr = df_hist[df_hist['year'] < current_year]
-    if len(tr) == 0:
-        print("   ❌ No training data. Check dataset.")
-        sys.exit(1)
-
-    print(f"   Training on {len(tr):,} rows (years < {current_year})...")
-    model = lgb.train(
-        params_920,
-        lgb.Dataset(tr[FEATURES_920], label=tr['target']),
-        num_boost_round=300
-    )
-    print(f"   ✅ Model trained.")
-
-    # ── Step C: Score today's features ──────────────────────────────────────────
-
-    df_features[FEATURES_920] = df_features[FEATURES_920].fillna(0)
+    # Score all candidate stocks
     df_features['prob'] = model.predict(df_features[FEATURES_920])
     df_features = df_features.sort_values('prob', ascending=False).reset_index(drop=True)
+
     top4 = df_features.head(4).copy()
     top4['quantity'] = top4['entry_price'].apply(lambda p: int(500000 / p) if pd.notna(p) and p > 0 else 0)
 
-    print("\n🏆 TOP 4 PICKS (09:20 Scalp):")
-    print(f"{'Rank':<6} {'Stock':<16} {'Prob':<10} {'Entry~':<12}")
-    print("-" * 46)
+    print("\n🏆 TOP 4 PICKS (09:20 Scalp Verified Model):")
+    print(f"{'Rank':<6} {'Stock':<16} {'Prob':<10} {'Entry~':<12} {'Qty (₹5L)':<12}")
+    print("-" * 58)
     for i, row in top4.iterrows():
         rank = i + 1
-        print(f"  {rank:<5} {row['clean_stock']:<16} {row['prob']:<10.4f} {row.get('entry_price', 0):<12.2f}")
+        print(f"  {rank:<5} {row['clean_stock']:<16} {row['prob']:<10.4f} ₹{row.get('entry_price', 0):<11.2f} {row.get('quantity', 0):<12}")
 
-    
     return top4
 
 
@@ -466,6 +504,49 @@ def save_predictions(top4, today_str):
     
     return top4_save
 
+def append_to_pending_ledger(top4, today_str):
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    new_rows = []
+    for idx, row in top4.reset_index(drop=True).iterrows():
+        new_rows.append({
+            'date': today_str,
+            'rank': idx + 1,
+            'stockname': str(row['clean_stock']).strip().upper(),
+            'short_prob': round(float(row['prob']), 4),
+            'close_0919': round(float(row['entry_price']), 2),
+            'lotsize': int(row['quantity']),
+            'entry_time': '09:25:00',
+            'entry_price': np.nan,
+            'exit_time': '09:40:00',
+            'exit_price': np.nan,
+            'gross_pnl': np.nan,
+            'charges': 300.0,
+            'net_pnl': np.nan,
+            'return_pct': np.nan,
+            'status': 'PENDING',
+            'predicted_at': now_str,
+            'reconciled_at': np.nan,
+            'qty': int(row['quantity']),
+            'prob': round(float(row['prob']), 4)
+        })
+    df_new = pd.DataFrame(new_rows)
+    if os.path.exists(LEDGER_FILE):
+        try:
+            df_ledger = pd.read_csv(LEDGER_FILE)
+            already_done = ((df_ledger['date'] == today_str) & (df_ledger.get('status', '') == 'COMPLETED')).any()
+            if not already_done:
+                df_ledger = df_ledger[df_ledger['date'] != today_str]
+                df_ledger = pd.concat([df_ledger, df_new], ignore_index=True)
+                df_ledger.to_csv(LEDGER_FILE, index=False)
+                print(f"📓 Ledger updated for {today_str} (Status: PENDING)")
+            else:
+                print(f"ℹ️ Date {today_str} already COMPLETED in ledger; skipped overwriting.")
+        except Exception as e:
+            print(f"⚠️ Error updating ledger: {e}")
+    else:
+        df_new.to_csv(LEDGER_FILE, index=False)
+        print(f"📓 Created ledger with today's PENDING records.")
+
 def reconcile_to_ledger(top4, exit_results, today_str):
     rows = []
     for _, pred_row in top4.iterrows():
@@ -505,10 +586,10 @@ def notify_predictions(top4, today_str, dry_run=False):
     from datetime import datetime
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')
     lines = [
-        f"⚡ <b>[09:20 SCALP ENGINE: 20-MIN SHORT SELL SELECTION]</b>",
+        f"⚡ <b>[09:20 SCALP ENGINE: 50/50 SPLIT SHORT SELL SELECTION]</b>",
         f"📅 <b>Date:</b> {today_str} | ⏱️ <b>Generated:</b> {now_str}",
-        f"🎯 <b>Holding Window:</b> 09:25 AM Entry ➔ 0.05% Trailing or 09:40 AM Exit",
-        f"📊 <b>Model Edge:</b> 77.64% Historical Win Rate | +₹130.07L Net PnL",
+        f"🎯 <b>Execution Architecture:</b> 50/50 Split (Leg 1 ₹2k TP + Leg 2 Cadence Runner)",
+        f"📊 <b>Model Edge:</b> 75.59% Historical Win Rate | +₹44.27L Net PnL (₹5L Capital)",
         "",
         "<b>🔻 TARGET 4 SHORT-SELL ORDERS:</b>"
     ]
@@ -522,10 +603,11 @@ def notify_predictions(top4, today_str, dry_run=False):
 
     lines.extend([
         "",
-        "⏱️ <b>Execution Rules:</b>",
-        "• <b>Entry:</b> Limit Sell at 09:25:00 AM IST",
-        "• <b>Exit:</b> Trailing Exit from 09:36 AM, Hard Exit at 09:40 AM",
-        "• <b>Risk:</b> Zero midday exposure, zero afternoon chop risk."
+        "⏱️ <b>50/50 Execution Rules:</b>",
+        "• <b>09:25:00:</b> Initial Limit Sell placed on book",
+        "• <b>09:27:00:</b> Cancel unfilled SELLs, place 50% Leg 1 Limit TP (Target: ₹2,000 Profit)",
+        "• <b>09:36:00–09:39:30:</b> 30s Cadence check (Lock profit if Net PnL >= ₹500)",
+        "• <b>09:40:00:</b> Hard Square-Off cover for any remaining open short quantity"
     ])
 
     msg = "\n".join(lines)
@@ -534,13 +616,18 @@ def notify_predictions(top4, today_str, dry_run=False):
         send_telegram(msg)
 
 def notify_reconcile(df_today, today_str, dry_run=False):
-    total_pnl = df_today['pnl_net'].sum()
-    wins       = (df_today['is_win'] == 1).sum()
+    total_pnl = df_today['pnl_net'].sum() if 'pnl_net' in df_today else 0.0
+    wins       = (df_today['is_win'] == 1).sum() if 'is_win' in df_today else 0
     lines = [f"📊 <b>09:20 SCALP RECONCILE | {today_str}</b>"]
     for _, row in df_today.iterrows():
-        emoji = "✅" if row['is_win'] == 1 else "❌"
-        lines.append(f"  {emoji} {row['stockname']}: ₹{row['pnl_net']:,.0f} [{row['exit_reason']}]")
-    lines.append(f"\n<b>Total PnL: ₹{total_pnl:,.0f} | Wins: {wins}/{len(df_today)}</b>")
+        is_win_val = row.get('is_win', 0)
+        pnl_val = row.get('pnl_net', 0.0)
+        pnl_str = f"₹{pnl_val:,.0f}" if pnl_val is not None and not pd.isna(pnl_val) else "N/A"
+        reason = row.get('exit_reason', 'PENDING')
+        emoji = "✅" if is_win_val == 1 else "❌"
+        lines.append(f"  {emoji} {row['stockname']}: {pnl_str} [{reason}]")
+    tot_pnl_str = f"₹{total_pnl:,.0f}" if total_pnl is not None and not pd.isna(total_pnl) else "N/A"
+    lines.append(f"\n<b>Total PnL: {tot_pnl_str} | Wins: {wins}/{len(df_today)}</b>")
     msg = "\n".join(lines)
     print(f"\n📣 Reconcile Telegram:\n{msg}")
     if not dry_run:
@@ -593,7 +680,7 @@ def main():
         sys.exit(1)
 
     # 2. Macro features
-    macro = fetch_macro_for_date(today_str)
+    macro = fetch_macro_for_date(today_str, prev_date_str)
 
     # 3. Score and select Top 4
     top4 = select_top4(df_features, macro, today_str, dry_run=args.dry_run)
@@ -613,31 +700,23 @@ def main():
             # 0920 needs 'close_0919' mapped to price and 'lotsize' or 'quantity'
             top4_for_insert = top4.copy()
             top4_for_insert['close_0919'] = top4_for_insert['entry_price']
-            
             insert_shortsell_orders(top4_for_insert, model_name='0920_SCALP', trade_date=today_str)
         except Exception as e:
             print(f"⚠️ Could not insert into shortsell_orders table: {e}")
+            
+        # Append to live ledger with status PENDING for evening reconciliation
+        try:
+            append_to_pending_ledger(top4, today_str)
+        except Exception as e:
+            print(f"⚠️ Could not update ledger: {e}")
     else:
-        print("\n[DRY RUN] Skipping insertion into shortsell_orders table.")
+        print("\n[DRY RUN] Skipping insertion into shortsell_orders table and ledger.")
 
     # 5. Telegram alert — predictions
     notify_predictions(top4, today_str, dry_run=args.dry_run)
 
-    # 6. Intraday monitoring (blocking — runs until 14:45)
-    if not args.dry_run:
-        # Wait until 09:36 when trailing starts, monitoring runs until 14:45
-        now = datetime.now()
-        market_open_str = f"{today_str} 09:25:00"
-        # Give a moment for orders to fill before monitoring
-        print(f"\n⏳ Waiting briefly before starting exit monitor...")
-        time.sleep(10)
-
-        exit_results = monitor_exits(top4, today_str, dry_run=False)
-        df_today = reconcile_to_ledger(top4, exit_results, today_str)
-        notify_reconcile(df_today, today_str, dry_run=False)
-    else:
-        print("\n[DRY RUN] Prediction phase complete. Skipping live monitoring.")
-        print("   Run with --reconcile after market close to reconcile PnL.")
+    print("\n✅ Morning prediction phase complete. Shortsell orders ready for Kotak Neo execution at 09:24:56 AM.")
+    print("   Run with --reconcile after market close to reconcile PnL.")
 
 
 if __name__ == '__main__':
