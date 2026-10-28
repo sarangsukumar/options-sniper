@@ -13,7 +13,7 @@ echo "==========================================================================
 echo "🕒 Starting 09:40 Hybrid Evening Reconciler at $(date)"
 echo "=============================================================================="
 
-/usr/bin/python3 "$DIR/reconcile_0940_hybrid_pnl.py" "$@"
+/usr/bin/python3 "$DIR/reconcile_0940_hybrid_pnl.py" --no-telegram "$@"
 /usr/bin/python3 "$DIR/reconcile_0940_live_mimic_pnl.py" "$@"
 
 EXIT_CODE=$?

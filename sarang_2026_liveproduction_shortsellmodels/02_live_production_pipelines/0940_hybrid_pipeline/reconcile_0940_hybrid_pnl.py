@@ -138,7 +138,7 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
                 print(f"⚠️ No tick data found for {s} on {d} in both scrapdata_F1 and scrapdata. Leaving as PENDING.")
                 continue
 
-            # Simulate Futures (F1)
+            # Simulate Futures (F1) with 3-Minute Consecutive Breach Check
             f1_entry_p, f1_exit_p, f1_exit_time, f1_exit_reason, f1_net_pnl, f1_ret_pct = None, None, None, None, None, None
             if ticks_f1:
                 f1_entry_p = float(ticks_f1[0]['price'])
@@ -146,13 +146,18 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
                 f1_exit_p = float(ticks_f1[-1]['price'])
                 f1_exit_time = '14:45:00'
                 f1_exit_reason = 'TIME_EXIT'
+                f1_breaches = 0
                 for t in ticks_f1:
                     p = float(t['price'])
                     if p >= f1_sl:
-                        f1_exit_p = f1_sl
-                        f1_exit_time = str(t['time']).split()[-1]
-                        f1_exit_reason = 'STOP_LOSS'
-                        break
+                        f1_breaches += 1
+                        if f1_breaches >= 3:
+                            f1_exit_p = p
+                            f1_exit_time = str(t['time']).split()[-1]
+                            f1_exit_reason = 'STOP_LOSS_3MIN'
+                            break
+                    else:
+                        f1_breaches = 0
                 f1_pts = round(f1_entry_p - f1_exit_p, 2)
                 f1_gross = round(f1_pts * total_qty, 2)
                 f1_charges = get_taxes(total_qty, f1_entry_p, f1_exit_p)
@@ -165,7 +170,7 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
                 df_ledger.loc[idx, 'f1_net_pnl'] = f1_net_pnl
                 df_ledger.loc[idx, 'f1_return_pct'] = f1_ret_pct
 
-            # Simulate Cash Equity (EQ)
+            # Simulate Cash Equity (EQ) with 3-Minute Consecutive Breach Check
             eq_entry_p, eq_exit_p, eq_exit_time, eq_exit_reason, eq_net_pnl, eq_ret_pct = None, None, None, None, None, None
             if ticks_eq:
                 eq_entry_p = float(ticks_eq[0]['price'])
@@ -173,13 +178,18 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
                 eq_exit_p = float(ticks_eq[-1]['price'])
                 eq_exit_time = '14:45:00'
                 eq_exit_reason = 'TIME_EXIT'
+                eq_breaches = 0
                 for t in ticks_eq:
                     p = float(t['price'])
                     if p >= eq_sl:
-                        eq_exit_p = eq_sl
-                        eq_exit_time = str(t['time']).split()[-1]
-                        eq_exit_reason = 'STOP_LOSS'
-                        break
+                        eq_breaches += 1
+                        if eq_breaches >= 3:
+                            eq_exit_p = p
+                            eq_exit_time = str(t['time']).split()[-1]
+                            eq_exit_reason = 'STOP_LOSS_3MIN'
+                            break
+                    else:
+                        eq_breaches = 0
                 eq_pts = round(eq_entry_p - eq_exit_p, 2)
                 eq_gross = round(eq_pts * total_qty, 2)
                 eq_charges = get_taxes(total_qty, eq_entry_p, eq_exit_p)
@@ -192,13 +202,13 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
                 df_ledger.loc[idx, 'eq_net_pnl'] = eq_net_pnl
                 df_ledger.loc[idx, 'eq_return_pct'] = eq_ret_pct
 
-            # Primary columns (prioritize Futures if available, otherwise Cash Equity)
-            use_f1 = (f1_entry_p is not None)
-            p_entry = f1_entry_p if use_f1 else eq_entry_p
+            # Primary columns (prioritize Cash Equity scrapdata since live trading is on EQ, fallback to Futures)
+            use_eq = (eq_entry_p is not None)
+            p_entry = eq_entry_p if use_eq else f1_entry_p
             p_sl = round(p_entry * 1.0225, 2)
-            p_exit = f1_exit_p if use_f1 else eq_exit_p
-            p_exit_time = f1_exit_time if use_f1 else eq_exit_time
-            p_exit_reason = f1_exit_reason if use_f1 else eq_exit_reason
+            p_exit = eq_exit_p if use_eq else f1_exit_p
+            p_exit_time = eq_exit_time if use_eq else f1_exit_time
+            p_exit_reason = eq_exit_reason if use_eq else f1_exit_reason
             p_pts = round(p_entry - p_exit, 2)
             p_gross = round(p_pts * total_qty, 2)
             p_charges = round(300.0 * lots_to_trade, 2)

@@ -135,7 +135,29 @@ def send_telegram_alert(msg):
             pass
     threading.Thread(target=_send, daemon=True).start()
 
-def get_tick_size(price):
+_STOCK_TICK_CACHE = {}
+
+def get_tick_size(price, stockname=None, client=None):
+    if stockname:
+        raw_sym = str(stockname).strip().upper()
+        clean_sym = SYMBOL_ALIASES.get(raw_sym, raw_sym) if 'SYMBOL_ALIASES' in globals() else raw_sym
+        if clean_sym in _STOCK_TICK_CACHE:
+            return _STOCK_TICK_CACHE[clean_sym]
+        if client is not None:
+            try:
+                with suppress_stdout():
+                    res = client.search_scrip(exchange_segment='nse_cm', symbol=clean_sym)
+                data = res if isinstance(res, list) else (res.get('data', []) if isinstance(res, dict) else [])
+                for d in data:
+                    if str(d.get('pTrdSymbol', '')).strip().upper() == f"{clean_sym}-EQ":
+                        dtick = float(d.get('dTickSize', 0) or 0)
+                        if dtick > 0:
+                            tick_rs = round(dtick / 100.0, 2)
+                            _STOCK_TICK_CACHE[clean_sym] = tick_rs
+                            _STOCK_TICK_CACHE[raw_sym] = tick_rs
+                            return tick_rs
+            except Exception:
+                pass
     if price <= 250:   return 0.01
     if price <= 1000:  return 0.05
     if price <= 5000:  return 0.10
@@ -143,8 +165,8 @@ def get_tick_size(price):
     if price <= 20000: return 1.00
     return 5.00
 
-def round_to_tick(price):
-    tick = get_tick_size(price)
+def round_to_tick(price, stockname=None, client=None):
+    tick = get_tick_size(price, stockname=stockname, client=client)
     return round(round(price / tick) * tick, 2)
 
 import glob
@@ -955,17 +977,19 @@ def _run_reentry_orders(model_name, today, target_stock=None, target_qty=None, t
                             state_dict = json.load(sf)
                     stk_st = state_dict.get(stockname, {})
                     orig_ep = stk_st.get('leg1_entry_price', price)
+                    leg2_sl_price = round_to_tick(price * 1.015)
+                    leg2_tp2_price = round_to_tick(price * 0.985)
                     stk_st['reentry_status'] = 'REENTRY_ACTIVE'
                     stk_st['reentry_price'] = round_to_tick(price)
                     stk_st['reentry_qty'] = quantity
                     stk_st['reentry_time'] = sys_time.time()
                     stk_st['reentry_order_id'] = broker_order_id
-                    stk_st['reentry_sl'] = orig_ep  # Stop Loss anchored at Original Leg 1 Entry (Zero Capital Risk)
-                    stk_st['reentry_tp2'] = round_to_tick(price * 0.9825) # 1.75% decline target
+                    stk_st['reentry_sl'] = leg2_sl_price  # Tight 1.50% SL above Leg 2 re-entry
+                    stk_st['reentry_tp2'] = leg2_tp2_price # 1.50% profit trailing activation
                     state_dict[stockname] = stk_st
                     with open(state_file, 'w') as sf:
                         json.dump(state_dict, sf, indent=2)
-                    log_print(f"  💾 State persisted for {stockname}: ReEntry Price=₹{price:.2f}, SL=₹{orig_ep:.2f}, TP2=₹{stk_st['reentry_tp2']:.2f}")
+                    log_print(f"  💾 State persisted for {stockname}: ReEntry Price=₹{price:.2f}, SL(1.50%)=₹{leg2_sl_price:.2f}, TrailAct(1.50%)=₹{leg2_tp2_price:.2f}")
                 except Exception as e:
                     log_print(f"  ⚠️ Failed to update state file for {stockname}: {e}")
 
@@ -984,20 +1008,21 @@ def _run_reentry_orders(model_name, today, target_stock=None, target_qty=None, t
                     log_print(f"  ⚠️ DB update notes failed for {stockname}: {e}")
 
                 # Telegram alert
-                tp2_price = round_to_tick(price * 0.9825)
+                leg2_sl_price = round_to_tick(price * 1.015)
+                tp2_price = round_to_tick(price * 0.985)
                 send_telegram_alert(
                     f"🚀 <b>[{model_name} - LEG 2 RE-ENTRY EXECUTED]</b>\n"
                     f"📅 {today} | ⏱️ {get_ist_now().strftime('%H:%M:%S IST')}\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"<b>• Stock:</b> <b>{stockname}</b>\n"
                     f"<b>• Action:</b> <b>SELL Limit (MIS)</b>\n"
-                    f"<b>• Re-Entry Price:</b> <b>₹{price:.2f}</b>\n"
-                    f"<b>• Quantity:</b> {quantity} (₹5L Capital)\n"
+                    f"<b>• Re-Entry Price:</b> <b>₹{price:.2f}</b> (Leg 1 Entry: ₹{orig_ep:.2f})\n"
+                    f"<b>• Quantity:</b> {quantity}\n"
                     f"<b>• Kotak Order ID:</b> <code>{broker_order_id}</code>\n"
-                    f"<b>• Leg 2 SL (Zero Capital Risk):</b> ₹{orig_ep:.2f}\n"
-                    f"<b>• Leg 2 TP2 (-1.75% Target):</b> <b>₹{tp2_price:.2f}</b>\n"
+                    f"<b>• Leg 2 Tight SL (+1.50%):</b> <b>₹{leg2_sl_price:.2f}</b>\n"
+                    f"<b>• Leg 2 Trailing TP Activation (-1.50%):</b> <b>₹{tp2_price:.2f}</b> (Trails 0.75% behind peak)\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"⚡ <i>Capital Protection Active — Net Strategy Gain Locked In</i>"
+                    f"⚡ <i>Stage 4 Re-Entry Protection Active</i>"
                 )
             else:
                 log_print(f"  ❌ {stockname} RE-ENTRY order FAILED after 3 attempts")
@@ -1317,11 +1342,12 @@ def _run_position_based_squareoff(model_name, today, exit_window):
             # Place New Limit Order
             scripcode = find_eq_scripcode(stockname)
             if exit_window == '1430':
-                limit_price = round_to_tick(live_ltp * 0.998)
+                limit_price = round_to_tick(live_ltp * 0.998, stockname=stockname, client=client)
                 limit_price_fmt = str(limit_price)
                 log_print(f"    → Placing 14:30 DISCOUNT BUY cover for {cover_qty} qty at ₹{limit_price_fmt} (LTP ₹{live_ltp:.2f} - 0.20%)")
             else:
-                limit_price = round_to_tick(live_ltp + get_tick_size(live_ltp))
+                stk_tick = get_tick_size(live_ltp, stockname=stockname, client=client)
+                limit_price = round_to_tick(live_ltp + stk_tick, stockname=stockname, client=client)
                 limit_price_fmt = str(limit_price)
                 cadence_label = f" [{target_time.strftime('%H:%M:%S')}]" if target_time else ""
                 log_print(f"    → Placing BUY cover{cadence_label} for {cover_qty} qty at ₹{limit_price_fmt} (LTP: ₹{live_ltp:.2f})")
