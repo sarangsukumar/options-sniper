@@ -774,10 +774,10 @@ def _run_orders(model_name, today):
 
         log_print(f"\n  Summary [{userid}]: ✅ Placed={success_list} | ❌ Failed={failed_list}")
 
-        # ── 0920_SCALP 50/50 Split Strategy: Orders rest until 09:27:00 IST cutoff ──
+        # ── 0920_SCALP 100% Single-Leg Trailing Strategy: Orders rest until 09:27:00 IST cutoff ──
         if model_name == '0920_SCALP' and success_list:
-            log_print(f"\n⏳ [0920_SCALP] Initial SELL limit orders placed on book.")
-            log_print(f"   Resting until 09:27:00 IST cutoff. At 09:27:00 AM, confirm_0925_fills.py will cancel unfilled SELLs & place 50% Leg 1 Limit TP (₹2,000 profit).")
+            log_print(f"\n⏳ [0920_SCALP] Initial SELL limit orders placed on book (100% Single-Leg Trailing Strategy).")
+            log_print(f"   Resting until 09:27:00 IST cutoff. At 09:27:00 AM, confirm_0925_fills.py will cancel unfilled SELLs & arm 5s Trailing Protection (-₹5,000 SL | +₹2,000->+₹1,000 Floor | +₹4,000+->Peak-₹750 Trail).")
 
 
 def _place_0920_leg1_resting_tp(client, orders, success_list, today, tp_target_rs=2000.0):
@@ -1437,12 +1437,13 @@ def _run_position_based_squareoff(model_name, today, exit_window):
                             order_price = order_info.get('price', 0.0) if isinstance(order_info, dict) else 0.0
                             old_order_id = str(order_info)
 
-                            # Leg 1 Resting Limit TP is placed below live_ltp (at avg_sell - target_drop)
-                            if order_price > 0 and order_price < live_ltp:
-                                log_print(f"    ⏳ HOLD: PnL ₹{unrealized_pnl:.2f} < ₹{PROFIT_THRESHOLD_RS:.2f}. Preserving resting Leg 1 Limit TP in book @ ₹{order_price:.2f} (ID: {old_order_id}).")
+                            # Preserve any active SL / Floor / Trailing cover order placed by sl_near_alert_monitor.py
+                            # (only cancel if it was a stale cadence cover order placed when PnL >= ₹500, i.e., order_price <= avg_sell - 500/net_qty)
+                            cadence_cutoff_price = avg_sell - (PROFIT_THRESHOLD_RS / max(net_qty, 1))
+                            if order_price > cadence_cutoff_price:
+                                log_print(f"    🛡️ HOLD: PnL ₹{unrealized_pnl:.2f} < ₹{PROFIT_THRESHOLD_RS:.2f}. Preserving active SL/Trailing cover order in book @ ₹{order_price:.2f} (ID: {old_order_id}).")
                             else:
-                                # Stale cadence cover order from previous check where PnL >= 500
-                                log_print(f"    ❌ Cancelling stale cadence cover order (ID: {old_order_id}) as PnL ₹{unrealized_pnl:.2f} < ₹{PROFIT_THRESHOLD_RS:.2f}")
+                                log_print(f"    ❌ Cancelling stale cadence cover order (ID: {old_order_id} @ ₹{order_price:.2f}) as PnL ₹{unrealized_pnl:.2f} < ₹{PROFIT_THRESHOLD_RS:.2f}")
                                 try:
                                     with suppress_stdout():
                                         client.cancel_order(order_id=old_order_id)

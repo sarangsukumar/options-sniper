@@ -367,13 +367,14 @@ def select_top4(df_features, macro, today_str, dry_run=False):
 # ─── Step 4: Live intraday exit monitor ──────────────────────────────────────────
 def monitor_exits(top4, today_str, dry_run=False):
     """
-    Tick-by-tick exit monitor.
+    Tick-by-tick exit monitor (100% Single-Leg 3-Stage Trailing Strategy on ₹5L per stock).
     Entry: 09:25:00 market open price (first tick at/after 09:25)
     Exit rules:
-      1. All-time SL  = entry * 1.02 (2.0% above entry → short loses 2%)
-      2. 09:36–09:40  = 0.05% trailing stop (trail off intraday low)
-      3. 09:40–14:45  = 0.30% trailing stop
-      4. 14:45 sharp  = hard exit (take last available price)
+      1. Stage 1 Initial SL (Peak PnL < +₹2,000): -₹5,000 (1.00% above entry)
+      2. Stage 2 Profit Floor (+₹2,000 <= Peak PnL < +₹4,000): Lock +₹1,000 (+0.20%)
+      3. Stage 3 Dynamic Profit Trail (Peak PnL >= +₹4,000): Lock (Peak PnL - ₹750)
+      4. 09:36–09:39:30 Cadence: Exit if Net PnL >= +₹500
+      5. 09:40:00 sharp: Hard exit
     """
     if dry_run:
         print("\n[DRY RUN] Skipping live intraday monitoring.")
@@ -383,12 +384,12 @@ def monitor_exits(top4, today_str, dry_run=False):
     conn = get_conn()
     cur  = conn.cursor()
 
-    # Fetch all intraday ticks for top4 stocks from 09:25 to 14:45
+    # Fetch all intraday ticks for top4 stocks from 09:25 to 09:41
     stocks_str = "', '".join(top4['clean_stock'].tolist())
     cur.execute(f"""
         SELECT stockname, time, price FROM scrapdata
         WHERE date = '{today_str}'
-          AND TIME(time) >= '09:25:00' AND TIME(time) <= '14:46:00'
+          AND TIME(time) >= '09:25:00' AND TIME(time) <= '09:41:00'
           AND stockname IN ('{stocks_str}')
         ORDER BY stockname, time ASC
     """)
@@ -418,54 +419,57 @@ def monitor_exits(top4, today_str, dry_run=False):
 
         entry_price = float(entry_ticks[0]['price'])
         qty         = int(500000 / entry_price)
-        sl_price    = entry_price * 1.02    # 2.0% stop loss (price goes UP → we lose on short)
+        sl_price    = min(entry_price + (5000.0 / max(qty, 1)), entry_price * 1.0100)
 
-        # Trailing stop state
-        trail_low    = entry_price           # track intraday LOW (price going down is good for short)
+        trail_low    = entry_price
+        max_pnl_rs   = 0.0
         exit_price   = None
         exit_time    = None
-        exit_reason  = 'HARD_EXIT_1445'
+        exit_reason  = 'HARD_EXIT_0940'
 
-        print(f"   📌 {stock}: entry={entry_price:.2f}, sl={sl_price:.2f}, qty={qty}")
+        print(f"   📌 {stock}: entry={entry_price:.2f}, initial_sl={sl_price:.2f} (-₹5,000), qty={qty}")
 
-        for tick in entry_ticks:
+        for tick in entry_ticks[1:]:
             t_str = str(tick['time']).split()[-1]
             p     = float(tick['price'])
+            cur_pnl = (entry_price - p) * qty
 
-            # Update trailing low
+            # Determine active protection from prior peak before updating peak on this tick, or after peak update
             if p < trail_low:
                 trail_low = p
+            max_pnl_rs = max(max_pnl_rs, (entry_price - trail_low) * qty)
 
-            # 1. All-time SL — 2.0%
-            if p >= sl_price:
-                exit_price  = sl_price
-                exit_time   = t_str
-                exit_reason = 'SL_2PCT'
-                break
+            if max_pnl_rs >= 4000.0:
+                locked_pnl = max_pnl_rs - 750.0
+                active_stop_price = entry_price - (locked_pnl / max(qty, 1))
+                stage_lbl = f"TRAIL_LOCK_+{int(locked_pnl)}"
+            elif max_pnl_rs >= 2000.0:
+                locked_pnl = 1000.0
+                active_stop_price = entry_price - (1000.0 / max(qty, 1))
+                stage_lbl = "FLOOR_LOCK_+1000"
+            else:
+                locked_pnl = -5000.0
+                active_stop_price = sl_price
+                stage_lbl = "INITIAL_SL_-5000"
 
-            # 2. 09:36 – 09:40: 0.05% trailing stop
-            if '09:36:00' <= t_str < '09:40:00':
-                trail_threshold = trail_low * 1.0005   # 0.05% above the running low
-                if p >= trail_threshold:
-                    exit_price  = p
-                    exit_time   = t_str
-                    exit_reason = 'TRAIL_005_0936'
-                    break
-
-            # 3. 09:40 – 14:45: 0.30% trailing stop
-            if '09:40:00' <= t_str < '14:45:00':
-                trail_threshold = trail_low * 1.003    # 0.30% above the running low
-                if p >= trail_threshold:
-                    exit_price  = p
-                    exit_time   = t_str
-                    exit_reason = 'TRAIL_030_0940'
-                    break
-
-            # 4. Hard exit at 14:45
-            if t_str >= '14:45:00':
+            if p >= active_stop_price or cur_pnl <= locked_pnl:
                 exit_price  = p
                 exit_time   = t_str
-                exit_reason = 'HARD_EXIT_1445'
+                exit_reason = stage_lbl
+                break
+
+            if '09:36:00' <= t_str < '09:40:00':
+                chg_est = get_kotak_charges(qty, entry_price, p)
+                if (cur_pnl - chg_est) >= 500.0:
+                    exit_price  = p
+                    exit_time   = t_str
+                    exit_reason = 'CADENCE_0936_500'
+                    break
+
+            if t_str >= '09:40:00':
+                exit_price  = p
+                exit_time   = t_str
+                exit_reason = 'HARD_EXIT_0940'
                 break
 
         # If no exit triggered, take last tick
@@ -586,10 +590,10 @@ def notify_predictions(top4, today_str, dry_run=False):
     from datetime import datetime
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')
     lines = [
-        f"⚡ <b>[09:20 SCALP ENGINE: 50/50 SPLIT SHORT SELL SELECTION]</b>",
+        f"⚡ <b>[09:20 SCALP ENGINE: 100% SINGLE-LEG TRAILING SELECTION]</b>",
         f"📅 <b>Date:</b> {today_str} | ⏱️ <b>Generated:</b> {now_str}",
-        f"🎯 <b>Execution Architecture:</b> 50/50 Split (Leg 1 ₹2k TP + Leg 2 Cadence Runner)",
-        f"📊 <b>Model Edge:</b> 75.59% Historical Win Rate | +₹44.27L Net PnL (₹5L Capital)",
+        f"🎯 <b>Execution Architecture:</b> 100% Single-Leg (₹5L/Stock) | 3-Stage Profit Trailing",
+        f"📊 <b>Model Edge:</b> 76.29% Historical Win Rate | +₹48.46L Net PnL (₹5L Capital)",
         "",
         "<b>🔻 TARGET 4 SHORT-SELL ORDERS:</b>"
     ]
@@ -603,10 +607,13 @@ def notify_predictions(top4, today_str, dry_run=False):
 
     lines.extend([
         "",
-        "⏱️ <b>50/50 Execution Rules:</b>",
-        "• <b>09:25:00:</b> Initial Limit Sell placed on book",
-        "• <b>09:27:00:</b> Cancel unfilled SELLs, place 50% Leg 1 Limit TP (Target: ₹2,000 Profit)",
-        "• <b>09:36:00–09:39:30:</b> 30s Cadence check (Lock profit if Net PnL >= ₹500)",
+        "⏱️ <b>100% Single-Leg Execution & 5s Trailing Rules:</b>",
+        "• <b>09:25:00:</b> Initial Limit Sell (100% Qty / ₹5L per stock) placed on book",
+        "• <b>09:27:00:</b> Cancel unfilled SELLs & arm 5s Kotak Quotes Trailing Engine",
+        "• <b>Stage 1 Initial SL (Peak &lt; +₹2,000):</b> <b>-₹5,000 (1.00%)</b>",
+        "• <b>Stage 2 Profit Floor (Peak +₹2,000 to +₹3,999):</b> Locks <b>+₹1,000 (+0.20%)</b>",
+        "• <b>Stage 3 Dynamic Trail (Peak ≥ +₹4,000):</b> Trails <b>Peak - ₹750</b> (₹3,250, ₹4,250, ...)",
+        "• <b>09:36:00–09:39:30:</b> 30s Cadence check (Lock profit if Net PnL ≥ ₹500)",
         "• <b>09:40:00:</b> Hard Square-Off cover for any remaining open short quantity"
     ])
 

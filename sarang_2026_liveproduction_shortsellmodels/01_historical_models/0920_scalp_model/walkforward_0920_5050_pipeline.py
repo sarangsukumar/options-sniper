@@ -146,79 +146,85 @@ def load_or_build_dataset():
 def run_simulation(trades_data, capital):
     # Live logic: only consider orders filled by 09:27:00
     trades_filled = [t for t in trades_data if t['candles'][0][0][-8:] <= '09:27:00']
-    
+    scale = float(capital) / 500000.0
+
     results = []
     for tr in trades_filled:
         sp = tr['sell_price']
         total_qty = int(capital / sp)
         if total_qty <= 1:
             continue
-            
-        leg1_qty = total_qty // 2
-        leg2_qty = total_qty - leg1_qty
-        
-        sl_price = round(sp * 1.02, 2) # 2.0% hard SL
-        # Leg 1 TP targets ₹2,000 profit across the position
-        tp_drop = 2000.0 / float(total_qty)
-        tp_price = round(sp - tp_drop, 2)
-        
-        leg1_p, leg1_t, leg1_r = None, None, None
-        leg2_p, leg2_t, leg2_r = None, None, None
-        
-        for tm, o, h, l, c in tr['candles']:
+
+        sl_loss_rs = 5000.0 * scale
+        floor_act_rs = 2000.0 * scale
+        floor_lock_rs = 1000.0 * scale
+        trail_act_rs = 4000.0 * scale
+        trail_dist_rs = 750.0 * scale
+        cadence_min_rs = 500.0 * scale
+
+        initial_sl_p = min(round(sp + (sl_loss_rs / total_qty), 2), round(sp * 1.0100, 2))
+        max_pnl_rs = 0.0
+        exit_p, exit_t, exit_r = None, None, None
+
+        for idx, (tm, o, h, l, c) in enumerate(tr['candles']):
             t_str = tm[-8:]
-            
-            # 1. Hard SL Trigger (High >= sl_price)
-            if h >= sl_price:
-                if leg1_p is None:
-                    leg1_p, leg1_t, leg1_r = sl_price, tm, 'STOP_LOSS'
-                if leg2_p is None:
-                    leg2_p, leg2_t, leg2_r = sl_price, tm, 'STOP_LOSS'
-                break
-                
-            # 2. Leg 1 Limit TP Check (Low <= tp_price) - Active from 09:27:00
-            if leg1_p is None and t_str >= '09:27:00':
-                if l <= tp_price:
-                    leg1_p, leg1_t, leg1_r = tp_price, tm, 'LEG1_LIMIT_TP_2000'
-                    
-            # 3. Cadence Profit Lock Window (09:36:00 to 09:39:59)
-            if '09:36:00' <= t_str < '09:40:00':
-                cur_p = c if c > 0 else o
-                rem_qty = (leg1_qty if leg1_p is None else 0) + (leg2_qty if leg2_p is None else 0)
-                if rem_qty > 0:
-                    pnl = (sp - cur_p) * rem_qty
-                    if pnl >= 500.0:
-                        if leg1_p is None:
-                            leg1_p, leg1_t, leg1_r = cur_p, tm, 'CADENCE_500'
-                        if leg2_p is None:
-                            leg2_p, leg2_t, leg2_r = cur_p, tm, 'CADENCE_500'
+            cur_p = c if c > 0 else o
+
+            if idx > 0 and t_str >= '09:26:00':
+                if max_pnl_rs >= trail_act_rs:
+                    locked_rs = max_pnl_rs - trail_dist_rs
+                    stop_p = round(sp - (locked_rs / total_qty), 2)
+                    reason_tag = f"TRAIL_LOCK_+{int(locked_rs)}"
+                elif max_pnl_rs >= floor_act_rs:
+                    locked_rs = floor_lock_rs
+                    stop_p = round(sp - (floor_lock_rs / total_qty), 2)
+                    reason_tag = f"FLOOR_LOCK_+{int(floor_lock_rs)}"
+                else:
+                    stop_p = initial_sl_p
+                    reason_tag = f"INITIAL_SL_-{int(sl_loss_rs)}"
+
+                if h >= stop_p:
+                    exit_p, exit_t, exit_r = stop_p, tm, reason_tag
+                    break
+
+            best_p = min(l, cur_p) if l > 0 else cur_p
+            candle_peak_pnl = (sp - best_p) * total_qty
+            if candle_peak_pnl > max_pnl_rs:
+                max_pnl_rs = candle_peak_pnl
+
+            if t_str >= '09:27:00':
+                c_end = tr['candles'][idx + 1][1] if (idx + 1) < len(tr['candles']) else cur_p
+                if max_pnl_rs >= trail_act_rs:
+                    new_lock_rs = max_pnl_rs - trail_dist_rs
+                    new_stop_p = round(sp - (new_lock_rs / total_qty), 2)
+                    if c_end >= new_stop_p:
+                        exit_p, exit_t, exit_r = new_stop_p, tm, f"TRAIL_LOCK_+{int(new_lock_rs)}"
                         break
-                        
-            # 4. Hard 09:40:00 Square-Off
+                elif max_pnl_rs >= floor_act_rs:
+                    new_stop_p = round(sp - (floor_lock_rs / total_qty), 2)
+                    if c_end >= new_stop_p:
+                        exit_p, exit_t, exit_r = new_stop_p, tm, f"FLOOR_LOCK_+{int(floor_lock_rs)}"
+                        break
+
+            # Cadence Profit Lock Window (09:36:00 to 09:39:59)
+            if '09:36:00' <= t_str < '09:40:00':
+                pnl = (sp - cur_p) * total_qty
+                if pnl >= cadence_min_rs:
+                    exit_p, exit_t, exit_r = cur_p, tm, 'CADENCE_500'
+                    break
+
+            # Hard 09:40:00 Square-Off
             if t_str >= '09:40:00':
-                cur_p = c if c > 0 else o
-                if leg1_p is None:
-                    leg1_p, leg1_t, leg1_r = cur_p, tm, 'HARD_EXIT_0940'
-                if leg2_p is None:
-                    leg2_p, leg2_t, leg2_r = cur_p, tm, 'HARD_EXIT_0940'
+                exit_p, exit_t, exit_r = cur_p, tm, 'HARD_EXIT_0940'
                 break
-                
-        # Fallback if ticks terminated before 09:40
-        if leg1_p is None:
-            leg1_p, leg1_t, leg1_r = tr['candles'][-1][4], tr['candles'][-1][0], 'HARD_EXIT_0940'
-        if leg2_p is None:
-            leg2_p, leg2_t, leg2_r = tr['candles'][-1][4], tr['candles'][-1][0], 'HARD_EXIT_0940'
-            
-        gross_pnl = (sp - leg1_p) * leg1_qty + (sp - leg2_p) * leg2_qty
-        
-        # Calculate institutional Kotak friction
-        if leg1_t == leg2_t and leg1_p == leg2_p:
-            comm = get_kotak_charges(total_qty, sp, leg1_p)
-        else:
-            comm = get_kotak_charges(leg1_qty, sp, leg1_p) + get_kotak_charges(leg2_qty, sp, leg2_p) - 20.0
-            
+
+        if exit_p is None:
+            exit_p, exit_t, exit_r = tr['candles'][-1][4], tr['candles'][-1][0], 'HARD_EXIT_0940'
+
+        gross_pnl = (sp - exit_p) * total_qty
+        comm = get_kotak_charges(total_qty, sp, exit_p)
         net_pnl = gross_pnl - comm
-        
+
         results.append({
             'date': tr['date'],
             'year': tr['year'],
@@ -229,19 +235,19 @@ def run_simulation(trades_data, capital):
             'sell_price': sp,
             'total_qty': total_qty,
             'capital': capital,
-            'leg1_qty': leg1_qty,
-            'leg1_exit_time': leg1_t,
-            'leg1_exit_price': leg1_p,
-            'leg1_reason': leg1_r,
-            'leg2_qty': leg2_qty,
-            'leg2_exit_time': leg2_t,
-            'leg2_exit_price': leg2_p,
-            'leg2_reason': leg2_r,
+            'leg1_qty': total_qty,
+            'leg1_exit_time': exit_t,
+            'leg1_exit_price': exit_p,
+            'leg1_reason': exit_r,
+            'leg2_qty': 0,
+            'leg2_exit_time': exit_t,
+            'leg2_exit_price': exit_p,
+            'leg2_reason': exit_r,
             'gross_pnl': round(gross_pnl, 2),
             'commission': round(comm, 2),
             'net_pnl': round(net_pnl, 2)
         })
-        
+
     return pd.DataFrame(results)
 
 def analyze_performance(df, capital_name):

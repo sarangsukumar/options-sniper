@@ -739,23 +739,99 @@ def generate_sl_warning_image(alert_items, timestamp_str, output_path='/tmp/sl_w
         print(f"❌ SL Warning image generation failed: {e}")
         return None
 
-def main():
-    import pytz
-    ist = pytz.timezone('Asia/Kolkata')
-    now = datetime.now(ist)
-    today_str = now.strftime('%Y-%m-%d')
-    now_ts = time.time()
-    
-    force_hourly = '--force-hourly' in sys.argv
-    current_time_int = int(now.strftime('%H%M'))
-    
-    # Check if inside any valid window
-    is_0920_window = (925 <= current_time_int <= 940)
-    is_0940_window = (943 <= current_time_int <= 1515) or force_hourly
-    
-    if not (is_0920_window or is_0940_window or force_hourly):
-        print(f"[{now.strftime('%H:%M:%S IST')}] Outside monitoring windows (09:25-09:40 & 09:43-15:15). Exiting.")
-        return
+def evaluate_0920_position(client, stk, info, broker_pos, stk_state, ltp, current_time_int, open_buy_orders, today_str, ist):
+    """
+    09:20 Scalp Model (09:25 to 09:40) — 100% Single-Leg 3-Stage Trailing & Stop-Loss Engine (₹5L per stock):
+      - Stage 1 (Peak PnL < +₹2,000): Initial Stop Loss = -₹5,000 (1.00% adverse move)
+      - Stage 2 (+₹2,000 <= Peak PnL < +₹4,000): Minimum Profit Floor Lock = +₹1,000 (+0.20%)
+      - Stage 3 (Peak PnL >= +₹4,000): Dynamic Trailing Profit Lock = Peak PnL - ₹750 (₹3,250, ₹4,250, ...)
+    """
+    qty = broker_pos.get('qty', 0)
+    if qty <= 0 or ltp <= 0:
+        return False
+
+    ep = broker_pos.get('avg_entry', 0.0) if broker_pos.get('avg_entry', 0.0) > 0 else info.get('entry_price', 0.0)
+    if ep <= 0:
+        return False
+
+    model = info['model_name']
+    loss_pct = ((ltp - ep) / ep) * 100.0
+    stock_pnl = (ep - ltp) * qty
+
+    # Update Peak Profit & Min LTP Seen
+    min_ltp_0920 = min(ltp, ep, stk_state.get('min_ltp_0920', ltp))
+    stk_state['min_ltp_0920'] = min_ltp_0920
+    max_pnl_0920 = max(stk_state.get('max_pnl_0920', 0.0), (ep - min_ltp_0920) * qty, stock_pnl)
+    stk_state['max_pnl_0920'] = max_pnl_0920
+
+    # Determine Active Protection Stage
+    if max_pnl_0920 >= 4000.0:
+        locked_pnl_rs = max_pnl_0920 - 750.0
+        active_sl_price = round_to_tick(ep - (locked_pnl_rs / qty), stockname=stk, client=client)
+        action_type = f"09:20 TRAILING PROFIT LOCK (+₹{locked_pnl_rs:,.0f} Locked | Peak: +₹{max_pnl_0920:,.0f})"
+        if not stk_state.get('trail_4000_notified'):
+            stk_state['trail_4000_notified'] = True
+            broadcast_telegram_alert(
+                f"🚀 <b>[{model} - STAGE 3 DYNAMIC PROFIT TRAIL ARMED]</b>\n"
+                f"📅 {today_str} | ⏱️ {datetime.now(ist).strftime('%H:%M:%S IST')}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"<b>• Stock:</b> <b>{stk}</b> (Qty: {qty})\n"
+                f"<b>• Entry:</b> ₹{ep:.2f} | <b>Min LTP:</b> ₹{min_ltp_0920:.2f}\n"
+                f"<b>• Peak Profit:</b> <b>+₹{max_pnl_0920:,.0f}</b>\n"
+                f"<b>• Trailing Lock (Peak - ₹750):</b> <b>+₹{locked_pnl_rs:,.0f}</b> (@ <b>₹{active_sl_price:.2f}</b>)\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            )
+    elif max_pnl_0920 >= 2000.0:
+        locked_pnl_rs = 1000.0
+        active_sl_price = round_to_tick(ep - (1000.0 / qty), stockname=stk, client=client)
+        action_type = f"09:20 PROFIT FLOOR LOCK (+₹1,000 Locked | Peak: +₹{max_pnl_0920:,.0f})"
+        if not stk_state.get('floor_2000_notified'):
+            stk_state['floor_2000_notified'] = True
+            broadcast_telegram_alert(
+                f"🔒 <b>[{model} - STAGE 2 PROFIT FLOOR (+₹1,000) LOCKED]</b>\n"
+                f"📅 {today_str} | ⏱️ {datetime.now(ist).strftime('%H:%M:%S IST')}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"<b>• Stock:</b> <b>{stk}</b> (Qty: {qty})\n"
+                f"<b>• Entry:</b> ₹{ep:.2f} | <b>Current LTP:</b> ₹{ltp:.2f}\n"
+                f"<b>• Peak Profit Reached:</b> <b>+₹{max_pnl_0920:,.0f}</b> (≥ +₹2,000)\n"
+                f"<b>• Protected Floor:</b> <b>+₹1,000</b> (@ <b>₹{active_sl_price:.2f}</b>)\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            )
+    else:
+        locked_pnl_rs = -5000.0
+        active_sl_price = min(
+            round_to_tick(ep + (5000.0 / qty), stockname=stk, client=client),
+            round_to_tick(ep * 1.0100, stockname=stk, client=client)
+        )
+        action_type = "09:20 INITIAL STOP LOSS (-₹5,000 / 1.00%)"
+
+    stk_state['locked_pnl_0920'] = locked_pnl_rs
+    stk_state['active_sl_0920'] = active_sl_price
+
+    # Execute Square-Off if protection level is breached (from 09:27 onwards, or immediate 2.0% emergency circuit)
+    hit_exit = (
+        (current_time_int >= 927 and (stock_pnl <= locked_pnl_rs or ltp >= active_sl_price))
+        or (loss_pct >= 2.0)
+    )
+
+    if hit_exit:
+        limit_cover_price = round_to_tick(ltp + 0.10, stockname=stk, client=client)
+        existing_open = open_buy_orders.get(stk)
+        open_price = existing_open['price'] if isinstance(existing_open, dict) else 0.0
+        if existing_open and abs(open_price - limit_cover_price) < 0.01:
+            print(f"⏳ [{stk}] {action_type} limit buy order already resting at ₹{limit_cover_price:.2f}. Awaiting fill.")
+        else:
+            print(f"🛑 [{stk}] {action_type} Triggered! LTP=₹{ltp:.2f} (Trigger ₹{active_sl_price:.2f}) | PnL=₹{stock_pnl:+,.0f} (Lock ₹{locked_pnl_rs:+,.0f})")
+            execute_limit_squareoff_order(
+                client=client, stockname=stk, qty=qty, limit_price=limit_cover_price,
+                model_name=model, loss_pct=loss_pct, open_buy_orders=open_buy_orders,
+                action_type=action_type, stock_pnl=stock_pnl
+            )
+        return True
+    return False
+
+
+def _run_main_core(ist, now, today_str, now_ts, force_hourly, current_time_int, is_0920_window, is_0940_window):
 
     # Fetch Today's Active Short Sell Orders
     conn = get_db_connection()
@@ -1171,43 +1247,17 @@ def main():
 
         # ==========================================
         # LOGIC FOR 09:20 MODEL (09:25 to 09:40)
-        # 50/50 Split Strategy + Dynamic Basket SL:
-        #   - Base Stop Loss: ₹6,250 / 1.25% adverse move
-        #   - Cond A (>=2 stocks hit Leg 1 TP & OtherPnL >= +₹3,000): tighten to ₹3,500 / 0.70%
-        #   - Cond B (Time >= 09:34 & OtherPnL >= +₹3,500): tighten to ₹3,000 / 0.60%
+        # 100% Single-Leg 3-Stage Trailing & Stop-Loss (₹5L per stock):
+        #   - Stage 1 (Peak PnL < +₹2,000): Initial SL = -₹5,000 (1.00%)
+        #   - Stage 2 (+₹2,000 <= Peak PnL < +₹4,000): Profit Floor = +₹1,000 (+0.20%)
+        #   - Stage 3 (Peak PnL >= +₹4,000): Trailing Profit Lock = Peak PnL - ₹750 (₹3,250, ₹4,250, ...)
         # ==========================================
         if info['is_0920'] and is_0920_window:
-            tot_basket_0920 = sum(basket_pnl_0920.values())
-            this_tot_pnl_0920 = basket_pnl_0920.get(stk, stock_pnl)
-            other_pnl_0920 = tot_basket_0920 - this_tot_pnl_0920
-            tp1_hit_cnt_0920 = sum(1 for v in basket_tp1_0920.values() if v)
-
-            active_sl_pct = 1.25
-            active_sl_rs = 6250.0
-            action_type = "BASE STOP LOSS (₹6,250 / 1.25%)"
-
-            if tp1_hit_cnt_0920 >= 2 and other_pnl_0920 >= 3000.0:
-                active_sl_pct = 0.70
-                active_sl_rs = 3500.0
-                action_type = f"DYNAMIC BASKET SL-A (₹3,500 / 0.70% | {tp1_hit_cnt_0920} TP1s, OtherPnL +₹{other_pnl_0920:,.0f})"
-
-            if current_time_int >= 934 and other_pnl_0920 >= 3500.0:
-                active_sl_pct = 0.60
-                active_sl_rs = 3000.0
-                action_type = f"DYNAMIC BASKET SL-B >=09:34 (₹3,000 / 0.60% | OtherPnL +₹{other_pnl_0920:,.0f})"
-
-            hit_sl = (loss_pct >= active_sl_pct or this_tot_pnl_0920 <= -active_sl_rs or loss_pct >= 2.0)
-
-            if hit_sl:
-                limit_cover_price = round_to_tick(ltp + 0.10)
-
-                existing_open = open_buy_orders.get(stk)
-                open_price = existing_open['price'] if isinstance(existing_open, dict) else 0.0
-                if existing_open and abs(open_price - limit_cover_price) < 0.01:
-                    print(f"⏳ [{stk}] 09:20 {action_type} limit buy order already resting at ₹{limit_cover_price:.2f}. Awaiting fill.")
-                else:
-                    execute_limit_squareoff_order(client, stk, qty, limit_cover_price, model, loss_pct, open_buy_orders, action_type, stock_pnl=this_tot_pnl_0920)
-
+            evaluate_0920_position(
+                client=client, stk=stk, info=info, broker_pos=broker_pos,
+                stk_state=stk_state, ltp=ltp, current_time_int=current_time_int,
+                open_buy_orders=open_buy_orders, today_str=today_str, ist=ist
+            )
             alert_state[stk] = stk_state
 
         # ==========================================
@@ -1537,6 +1587,62 @@ def main():
 
     save_alert_state(alert_state)
 
+    # ==========================================
+    # OPTION B: 5-Second Kotak Quotes Sub-Loop for 09:20 Window (Passes at t=5s and t=10s)
+    # Reuses the single active Kotak login session within each 20-second scheduler cycle
+    # ==========================================
+    if is_0920_window and not force_hourly:
+        active_0920_stocks = [
+            stk for stk, info in stock_map.items()
+            if info.get('is_0920') and stk in broker_positions
+            and not broker_positions[stk].get('is_closed')
+            and broker_positions[stk].get('qty', 0) > 0
+        ]
+        if active_0920_stocks:
+            for sub_pass in (2, 3):
+                time.sleep(5)
+                now_sub = datetime.now(ist)
+                sub_time_int = int(now_sub.strftime('%H%M'))
+                if sub_time_int > 940:
+                    break
+                try:
+                    pos_resp_sub = client.positions()
+                    pos_list_sub = pos_resp_sub.get('data', []) if isinstance(pos_resp_sub, dict) else (pos_resp_sub if isinstance(pos_resp_sub, list) else [])
+                    for p in pos_list_sub:
+                        if p.get('prod') != 'MIS':
+                            continue
+                        sym_sub = resolve_stock_aliases(p.get('trdSym', '') or p.get('sym', ''), active_keys=stock_map)
+                        if sym_sub in broker_positions:
+                            fl_sell, cf_sell = int(p.get('flSellQty', 0) or 0), int(p.get('cfSellQty', 0) or 0)
+                            fl_buy, cf_buy   = int(p.get('flBuyQty', 0) or 0), int(p.get('cfBuyQty', 0) or 0)
+                            net_short_sub = (fl_sell + cf_sell) - (fl_buy + cf_buy)
+                            broker_positions[sym_sub]['qty'] = net_short_sub
+                            broker_positions[sym_sub]['is_closed'] = (net_short_sub <= 0 and (fl_sell + cf_sell) > 0)
+                    open_buy_orders = get_open_buy_orders(client)
+                except Exception as sub_e:
+                    print(f"⚠️ [09:20 Sub-Pass {sub_pass}] Position/Order refresh warning: {sub_e}")
+
+                still_open_0920 = 0
+                for stk in active_0920_stocks:
+                    bp_sub = broker_positions.get(stk, {})
+                    if bp_sub.get('is_closed') or bp_sub.get('qty', 0) <= 0:
+                        continue
+                    still_open_0920 += 1
+                    ltp_sub = fetch_live_ltp(client, stk)
+                    if ltp_sub <= 0:
+                        continue
+                    stk_state = alert_state.get(stk, {})
+                    evaluate_0920_position(
+                        client=client, stk=stk, info=stock_map[stk], broker_pos=bp_sub,
+                        stk_state=stk_state, ltp=ltp_sub, current_time_int=sub_time_int,
+                        open_buy_orders=open_buy_orders, today_str=today_str, ist=ist
+                    )
+                    alert_state[stk] = stk_state
+
+                save_alert_state(alert_state)
+                if still_open_0920 == 0:
+                    break
+
     if is_hourly_due and hourly_items:
         meta['last_hourly_report_time'] = now_ts
         alert_state['_meta'] = meta
@@ -1607,6 +1713,55 @@ def main():
             broadcast_telegram_alert(msg)
     else:
         print(f"[{datetime.now(ist).strftime('%H:%M:%S')}] All positions checked. No active generic alerts needed.")
+
+
+def main():
+    import pytz
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist)
+    today_str = now.strftime('%Y-%m-%d')
+    now_ts = time.time()
+
+    force_hourly = '--force-hourly' in sys.argv
+    current_time_int = int(now.strftime('%H%M'))
+
+    # Check if inside any valid window
+    is_0920_window = (925 <= current_time_int <= 940)
+    is_0940_window = (943 <= current_time_int <= 1515) or force_hourly
+
+    if not (is_0920_window or is_0940_window or force_hourly):
+        print(f"[{now.strftime('%H:%M:%S IST')}] Outside monitoring windows (09:25-09:40 & 09:43-15:15). Exiting.")
+        return
+
+    # Single-instance PID lock during 09:20 5-second sub-loop window to prevent overlapping cron cycles
+    lock_file = '/tmp/sl_near_alert_monitor_0920.lock'
+    acquired_lock = False
+    if is_0920_window and not force_hourly:
+        if os.path.exists(lock_file):
+            try:
+                with open(lock_file, 'r') as lf:
+                    old_pid = int(lf.read().strip() or '0')
+                if old_pid > 0 and os.path.exists(f'/proc/{old_pid}') and (time.time() - os.path.getmtime(lock_file) < 25):
+                    print(f"[{now.strftime('%H:%M:%S IST')}] Active 09:20 5s monitor instance (PID {old_pid}) still running. Skipping overlap.")
+                    return
+            except Exception:
+                pass
+        try:
+            with open(lock_file, 'w') as lf:
+                lf.write(str(os.getpid()))
+            acquired_lock = True
+        except Exception:
+            pass
+
+    try:
+        _run_main_core(ist, now, today_str, now_ts, force_hourly, current_time_int, is_0920_window, is_0940_window)
+    finally:
+        if acquired_lock and os.path.exists(lock_file):
+            try:
+                os.remove(lock_file)
+            except Exception:
+                pass
+
 
 if __name__ == '__main__':
     main()

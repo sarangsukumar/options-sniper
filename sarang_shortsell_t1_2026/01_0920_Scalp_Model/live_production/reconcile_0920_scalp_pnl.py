@@ -24,9 +24,13 @@ Usage:
 
 import os
 import sys
+import time
 import argparse
 import subprocess
 from datetime import datetime
+import requests
+import urllib3.util.connection as urllib3_cn
+urllib3_cn.HAS_IPV6 = False
 import numpy as np
 import pandas as pd
 import pymysql
@@ -35,6 +39,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROD_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
 LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0920_live_ledger.csv')
 BOT_SCRIPT = '/home/ubuntu/KotakCodes1/status_Info_bot.js'
+STATUS_BOT_TOKEN = "7920868588:AAE4mPlDQJWnkv9CbmHO8idiSBVnP7K0Gko"
+STATUS_CHAT_ID = "-1002365534285"
 
 def get_taxes(qty, sell_price, buy_price):
     turnover = (qty * sell_price) + (qty * buy_price)
@@ -55,144 +61,159 @@ def get_db_connection():
     )
 
 def send_telegram_alert(msg):
+    sent_ok = False
     if os.path.exists(BOT_SCRIPT):
         try:
-            res = subprocess.run(['node', BOT_SCRIPT, msg], capture_output=True, text=True, timeout=20)
-            print(f"[Telegram Bot Response]: {res.stdout.strip()[:100]}")
+            res = subprocess.run(['node', BOT_SCRIPT, msg], capture_output=True, text=True, timeout=35)
+            out_str = res.stdout.strip()
+            print(f"[Telegram Bot Response]: {out_str[:100]}")
+            if res.returncode == 0 and "Message sent successfully" in out_str:
+                sent_ok = True
         except Exception as e:
-            print(f"⚠️ Telegram notification error: {e}")
-    else:
-        print("ℹ️ Telegram bot script not found; notification skipped.")
+            print(f"⚠️ Telegram node script error: {e}")
+
+    if not sent_ok:
+        url = f"https://api.telegram.org/bot{STATUS_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": STATUS_CHAT_ID, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True}
+        for attempt in range(1, 5):
+            try:
+                resp = requests.post(url, json=payload, timeout=12)
+                if resp.status_code == 200:
+                    print(f"[Telegram Direct IPv4 Fallback]: Sent successfully (attempt {attempt})")
+                    sent_ok = True
+                    break
+                print(f"⚠️ Telegram direct HTTP status {resp.status_code} (attempt {attempt})")
+            except Exception as e:
+                print(f"⚠️ Telegram direct HTTP error (attempt {attempt}/4): {e}")
+            time.sleep(2 * attempt)
+    return sent_ok
 
 def simulate_scalp(ticks, qty, date_str):
     """
-    Simulates the 50/50 Split Execution Strategy for 0920_SCALP:
-      - Leg 1 (50% qty): Passive resting Limit TP order on book at entry - (2000.0 / total_qty).
-      - Leg 2 (50% qty): Evaluated at 30s cadence (09:36:00 to 09:39:30) for profit >= ₹500, else 09:40 exit.
-      - Base Stop Loss: ₹3,000 risk or 0.60% adverse move.
+    Single-stock wrapper around simulate_scalp_basket (Base SL: ₹6,250 / 1.25%).
     """
     if not ticks:
         return None
+    res_map = simulate_scalp_basket({0: {'ticks': ticks, 'qty': qty}}, date_str)
+    return res_map.get(0)
 
-    entry_p = float(ticks[0]['price'])
-    entry_t = str(ticks[0]['time']).split()[-1]
-    
-    q1 = qty // 2
-    if q1 <= 0: q1 = 1
-    q2 = qty - q1
 
-    # Leg 1 TP: ₹2,000 profit
-    tp1_target = 2000.0
-    tp1_price = round(entry_p - (tp1_target / qty), 2)
-    # Base SL: ₹3,000 risk or 0.60% adverse move
-    sl_p = min(round(entry_p + (3000.0 / qty), 2), round(entry_p * 1.006, 2))
+def simulate_scalp_basket(stocks_data, date_str):
+    """
+    Simulates the 100% Single-Leg 3-Stage Trailing & Stop-Loss Strategy for 0920_SCALP (₹5L per stock):
+      - Stage 1 (Peak PnL < +₹2,000): Initial Stop-Loss = -₹5,000 (1.00% adverse move).
+      - Stage 2 (+₹2,000 <= Peak PnL < +₹4,000): Minimum Profit Floor Lock = +₹1,000 (+0.20%).
+      - Stage 3 (Peak PnL >= +₹4,000): Dynamic Trailing Profit Lock = Peak PnL - ₹750 (₹3,250, ₹4,250, ...).
+      - Stage 4 (09:36:00 to 09:39:30): 30s/1m Cadence check for profit >= +₹500, else 09:40:00 Hard Exit.
+    """
+    results = {}
 
-    leg1_filled = False
-    leg1_p = None
-    leg1_t = None
-    leg1_reason = None
+    for key, info in stocks_data.items():
+        ticks = info.get('ticks')
+        qty = int(info.get('qty', 1))
+        if not ticks or qty <= 0:
+            continue
 
-    leg2_filled = False
-    leg2_p = None
-    leg2_t = None
-    leg2_reason = None
+        entry_p = float(ticks[0]['price'])
+        entry_t = str(ticks[0]['time']).split()[-1]
+        initial_sl_p = min(round(entry_p + (5000.0 / qty), 2), round(entry_p * 1.0100, 2))
 
-    for t in ticks:
-        t_time = str(t['time'])
-        p = float(t['price'])
-        h = float(t.get('high') or p)
-        l = float(t.get('low') or p)
+        max_pnl_rs = 0.0
+        exit_p = None
+        exit_t = None
+        exit_reason = 'TIME_EXIT_0940'
 
-        # 1. Base Stop loss check
-        if h >= sl_p:
-            if not leg1_filled:
-                leg1_filled = True
-                leg1_p = sl_p
-                leg1_t = t_time.split()[-1]
-                leg1_reason = 'STOP_LOSS_3000'
-            if not leg2_filled:
-                leg2_filled = True
-                leg2_p = sl_p
-                leg2_t = t_time.split()[-1]
-                leg2_reason = 'STOP_LOSS_3000'
-            break
+        for i in range(1, len(ticks)):
+            tk = ticks[i]
+            t_time = str(tk['time'])
+            t_short = t_time.split()[-1]
+            p = float(tk['price'])
+            h = float(tk.get('high') or p)
+            l = float(tk.get('low') or p)
+            c_close = float(ticks[i + 1]['price']) if (i + 1) < len(ticks) else p
 
-        # 2. Leg 1 Resting Take Profit check (₹2,000 profit)
-        if not leg1_filled and l <= tp1_price:
-            leg1_filled = True
-            leg1_p = tp1_price
-            leg1_t = t_time.split()[-1]
-            leg1_reason = 'LEG1_TP_2000'
+            # Determine active protection level from running peak PnL prior to this candle's adverse spike
+            if max_pnl_rs >= 4000.0:
+                locked_pnl_rs = max_pnl_rs - 750.0
+                active_stop_p = round(entry_p - (locked_pnl_rs / qty), 2)
+                stop_reason = f"TRAIL_LOCK_+{int(locked_pnl_rs)}"
+            elif max_pnl_rs >= 2000.0:
+                locked_pnl_rs = 1000.0
+                active_stop_p = round(entry_p - (1000.0 / qty), 2)
+                stop_reason = "FLOOR_LOCK_+1000"
+            else:
+                locked_pnl_rs = -5000.0
+                active_stop_p = initial_sl_p
+                stop_reason = "INITIAL_SL_-5000"
 
-        # 3. Leg 2 / Remaining Trailing profit exit between 09:36:00 and 09:39:30
-        if f"{date_str} 09:36:00" <= t_time <= f"{date_str} 09:39:30":
-            if leg1_filled and not leg2_filled:
-                if (entry_p - p) * q2 >= 500.0:
-                    leg2_filled = True
-                    leg2_p = p
-                    leg2_t = t_time.split()[-1]
-                    leg2_reason = f'LEG2_CADENCE_{leg2_t[:5]}'
-                    break
-            elif not leg1_filled and not leg2_filled:
+            # 1. Check Stop-Loss / Trailing Profit Floor Breach (active >= 09:27:00)
+            if t_time >= f"{date_str} 09:27:00" and h >= active_stop_p:
+                exit_p = active_stop_p
+                exit_t = t_short
+                exit_reason = stop_reason
+                break
+
+            # 2. Update running peak profit from candle low
+            candle_best_pnl = (entry_p - min(l, p)) * qty
+            if candle_best_pnl > max_pnl_rs:
+                max_pnl_rs = candle_best_pnl
+
+            # Check if intrabar low activated floor/trail and candle close (next bar open) retraced above new lock
+            if t_time >= f"{date_str} 09:27:00":
+                if max_pnl_rs >= 4000.0:
+                    new_lock_rs = max_pnl_rs - 750.0
+                    new_stop_p = round(entry_p - (new_lock_rs / qty), 2)
+                    if c_close >= new_stop_p:
+                        exit_p = new_stop_p
+                        exit_t = t_short
+                        exit_reason = f"TRAIL_LOCK_+{int(new_lock_rs)}"
+                        break
+                elif max_pnl_rs >= 2000.0:
+                    new_stop_p = round(entry_p - (1000.0 / qty), 2)
+                    if c_close >= new_stop_p:
+                        exit_p = new_stop_p
+                        exit_t = t_short
+                        exit_reason = "FLOOR_LOCK_+1000"
+                        break
+
+            # 3. Late Cadence Profit Check (09:36:00 to 09:39:30)
+            if f"{date_str} 09:36:00" <= t_time <= f"{date_str} 09:39:30":
                 if (entry_p - p) * qty >= 500.0:
-                    leg1_filled = True
-                    leg1_p = p
-                    leg1_t = t_time.split()[-1]
-                    leg1_reason = f'CADENCE_{leg1_t[:5]}'
-                    leg2_filled = True
-                    leg2_p = p
-                    leg2_t = t_time.split()[-1]
-                    leg2_reason = f'CADENCE_{leg2_t[:5]}'
+                    exit_p = p
+                    exit_t = t_short
+                    exit_reason = f"CADENCE_{t_short[:5]}"
                     break
 
-        # 4. Hard Square-off at 09:40:00
-        if t_time >= f"{date_str} 09:40:00":
-            if not leg1_filled:
-                leg1_filled = True
-                leg1_p = p
-                leg1_t = t_time.split()[-1]
-                leg1_reason = 'TIME_EXIT_0940'
-            if not leg2_filled:
-                leg2_filled = True
-                leg2_p = p
-                leg2_t = t_time.split()[-1]
-                leg2_reason = 'TIME_EXIT_0940'
-            break
+            # 4. Hard Square-off at 09:40:00
+            if t_time >= f"{date_str} 09:40:00":
+                exit_p = p
+                exit_t = t_short
+                exit_reason = 'TIME_EXIT_0940'
+                break
 
-    # Fallback to last tick if not filled
-    if not leg1_filled or not leg2_filled:
-        last_p = float(ticks[-1]['price'])
-        last_t = str(ticks[-1]['time']).split()[-1]
-        if not leg1_filled:
-            leg1_filled = True
-            leg1_p = last_p
-            leg1_t = last_t
-            leg1_reason = 'TIME_EXIT_0940'
-        if not leg2_filled:
-            leg2_filled = True
-            leg2_p = last_p
-            leg2_t = last_t
-            leg2_reason = 'TIME_EXIT_0940'
+        if exit_p is None:
+            exit_p = float(ticks[-1]['price'])
+            exit_t = str(ticks[-1]['time']).split()[-1]
+            exit_reason = 'TIME_EXIT_0940'
 
-    gross = round((entry_p - leg1_p) * q1 + (entry_p - leg2_p) * q2, 2)
-    taxes = round(get_taxes(q1, entry_p, leg1_p) + get_taxes(q2, entry_p, leg2_p), 2)
-    net = round(gross - taxes, 2)
-    avg_exit_p = round((leg1_p * q1 + leg2_p * q2) / qty, 2)
-    ret_pct = round(((entry_p - avg_exit_p) / entry_p) * 100.0, 2) if entry_p > 0 else 0.0
-    exit_t = max(leg1_t, leg2_t) if leg1_t and leg2_t else (leg1_t or leg2_t)
-    exit_reason = f"{leg1_reason} + {leg2_reason}" if leg1_reason != leg2_reason else leg1_reason
+        gross = round((entry_p - exit_p) * qty, 2)
+        taxes = round(get_taxes(qty, entry_p, exit_p), 2)
+        net = round(gross - taxes, 2)
+        ret_pct = round(((entry_p - exit_p) / entry_p) * 100.0, 2) if entry_p > 0 else 0.0
 
-    return {
-        'entry_price': round(entry_p, 2),
-        'entry_time': entry_t,
-        'exit_price': avg_exit_p,
-        'exit_time': exit_t,
-        'exit_reason': exit_reason,
-        'gross_pnl': gross,
-        'net_pnl': net,
-        'return_pct': ret_pct,
-        'taxes': taxes
-    }
+        results[key] = {
+            'entry_price': round(entry_p, 2),
+            'entry_time': entry_t,
+            'exit_price': round(exit_p, 2),
+            'exit_time': exit_t,
+            'exit_reason': exit_reason,
+            'gross_pnl': gross,
+            'net_pnl': net,
+            'return_pct': ret_pct,
+            'taxes': taxes
+        }
+
+    return results
 
 def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False):
     if not os.path.exists(LEDGER_CSV):
@@ -223,88 +244,107 @@ def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False)
     reconciled_dates = set()
     completed_count = 0
 
+    target_dates = sorted(df_ledger.loc[target_indices, 'date'].astype(str).unique().tolist())
+
     with conn.cursor() as cursor:
-        for idx in target_indices:
-            row = df_ledger.loc[idx]
-            d = str(row['date'])
-            s = str(row['stockname']).strip().upper()
-            raw_lotsize = row.get('lotsize')
-            if pd.isna(raw_lotsize) or raw_lotsize is None:
-                raw_lotsize = row.get('qty', 1)
-            try:
-                lotsize = int(float(raw_lotsize))
-            except Exception:
-                lotsize = 1
+        for d in target_dates:
+            day_all_indices = df_ledger[df_ledger['date'].astype(str) == d].index.tolist()
+            f1_basket_input = {}
+            eq_basket_input = {}
+            stock_by_idx = {}
 
-            # 1. Fetch Futures (scrapdata_F1) ticks from 09:25:00 to 09:42:00
-            cursor.execute(f"""
-                SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
-                FROM scrapdata_F1 
-                WHERE date = '{d}' AND stockname = '{s}' 
-                  AND time >= '{d} 09:25:00' AND time <= '{d} 09:42:00'
-                  AND (isvalid = 'TRUE' OR isvalid IS NULL OR isvalid = '1' OR isvalid = '')
-                ORDER BY time ASC
-            """)
-            ticks_f1 = cursor.fetchall()
+            for idx in day_all_indices:
+                row = df_ledger.loc[idx]
+                s = str(row['stockname']).strip().upper()
+                stock_by_idx[idx] = s
+                raw_lotsize = row.get('lotsize')
+                if pd.isna(raw_lotsize) or raw_lotsize is None:
+                    raw_lotsize = row.get('qty', 1)
+                try:
+                    lotsize = int(float(raw_lotsize))
+                except Exception:
+                    lotsize = 1
 
-            # 2. Fetch Cash Equity (scrapdata) ticks from 09:25:00 to 09:42:00
-            cursor.execute(f"""
-                SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
-                FROM scrapdata 
-                WHERE date = '{d}' AND stockname = '{s}' 
-                  AND time >= '{d} 09:25:00' AND time <= '{d} 09:42:00'
-                  AND (isvalid = 'TRUE' OR isvalid IS NULL OR isvalid = '1' OR isvalid = '')
-                ORDER BY time ASC
-            """)
-            ticks_eq = cursor.fetchall()
+                # 1. Fetch Futures (scrapdata_F1) ticks from 09:25:00 to 09:42:00
+                cursor.execute(f"""
+                    SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
+                    FROM scrapdata_F1 
+                    WHERE date = '{d}' AND stockname = '{s}' 
+                      AND time >= '{d} 09:25:00' AND time <= '{d} 09:42:00'
+                      AND (isvalid = 'TRUE' OR isvalid IS NULL OR isvalid = '1' OR isvalid = '')
+                    ORDER BY time ASC
+                """)
+                ticks_f1 = cursor.fetchall()
+                if ticks_f1:
+                    f1_basket_input[idx] = {'ticks': ticks_f1, 'qty': lotsize}
 
-            res_f1 = simulate_scalp(ticks_f1, lotsize, d) if ticks_f1 else None
-            res_eq = simulate_scalp(ticks_eq, lotsize, d) if ticks_eq else None
+                # 2. Fetch Cash Equity (scrapdata) ticks from 09:25:00 to 09:42:00
+                cursor.execute(f"""
+                    SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
+                    FROM scrapdata 
+                    WHERE date = '{d}' AND stockname = '{s}' 
+                      AND time >= '{d} 09:25:00' AND time <= '{d} 09:42:00'
+                      AND (isvalid = 'TRUE' OR isvalid IS NULL OR isvalid = '1' OR isvalid = '')
+                    ORDER BY time ASC
+                """)
+                ticks_eq = cursor.fetchall()
+                if ticks_eq:
+                    eq_basket_input[idx] = {'ticks': ticks_eq, 'qty': lotsize}
 
-            if not res_f1 and not res_eq:
-                print(f"⚠️ {d} | {s}: Incomplete market data in both scrapdata and scrapdata_F1. Remains PENDING.")
-                continue
+            f1_basket_res = simulate_scalp_basket(f1_basket_input, d) if f1_basket_input else {}
+            eq_basket_res = simulate_scalp_basket(eq_basket_input, d) if eq_basket_input else {}
 
-            # Populate Futures fields
-            if res_f1:
-                df_ledger.at[idx, 'f1_entry_price'] = res_f1['entry_price']
-                df_ledger.at[idx, 'f1_exit_price'] = res_f1['exit_price']
-                df_ledger.at[idx, 'f1_gross_pnl'] = res_f1['gross_pnl']
-                df_ledger.at[idx, 'f1_net_pnl'] = res_f1['net_pnl']
-                df_ledger.at[idx, 'f1_return_pct'] = res_f1['return_pct']
-            else:
-                for col in ['f1_entry_price', 'f1_exit_price', 'f1_gross_pnl', 'f1_net_pnl', 'f1_return_pct']:
-                    df_ledger.at[idx, col] = np.nan
+            for idx in day_all_indices:
+                if idx not in target_indices:
+                    continue
+                s = stock_by_idx[idx]
+                res_f1 = f1_basket_res.get(idx)
+                res_eq = eq_basket_res.get(idx)
 
-            # Populate Cash Equity fields
-            if res_eq:
-                df_ledger.at[idx, 'eq_entry_price'] = res_eq['entry_price']
-                df_ledger.at[idx, 'eq_exit_price'] = res_eq['exit_price']
-                df_ledger.at[idx, 'eq_gross_pnl'] = res_eq['gross_pnl']
-                df_ledger.at[idx, 'eq_net_pnl'] = res_eq['net_pnl']
-                df_ledger.at[idx, 'eq_return_pct'] = res_eq['return_pct']
-            else:
-                for col in ['eq_entry_price', 'eq_exit_price', 'eq_gross_pnl', 'eq_net_pnl', 'eq_return_pct']:
-                    df_ledger.at[idx, col] = np.nan
+                if not res_f1 and not res_eq:
+                    print(f"⚠️ {d} | {s}: Incomplete market data in both scrapdata and scrapdata_F1. Remains PENDING.")
+                    continue
 
-            # Primary ledger fields (prioritize Futures if available, otherwise Cash Equity)
-            primary = res_f1 if res_f1 else res_eq
+                # Populate Futures fields
+                if res_f1:
+                    df_ledger.at[idx, 'f1_entry_price'] = res_f1['entry_price']
+                    df_ledger.at[idx, 'f1_exit_price'] = res_f1['exit_price']
+                    df_ledger.at[idx, 'f1_gross_pnl'] = res_f1['gross_pnl']
+                    df_ledger.at[idx, 'f1_net_pnl'] = res_f1['net_pnl']
+                    df_ledger.at[idx, 'f1_return_pct'] = res_f1['return_pct']
+                else:
+                    for col in ['f1_entry_price', 'f1_exit_price', 'f1_gross_pnl', 'f1_net_pnl', 'f1_return_pct']:
+                        df_ledger.at[idx, col] = np.nan
 
-            df_ledger.at[idx, 'entry_price'] = primary['entry_price']
-            df_ledger.at[idx, 'exit_price'] = primary['exit_price']
-            df_ledger.at[idx, 'entry_time'] = primary['entry_time']
-            df_ledger.at[idx, 'exit_time'] = primary['exit_time']
-            df_ledger.at[idx, 'exit_reason'] = primary['exit_reason']
-            df_ledger.at[idx, 'gross_pnl'] = primary['gross_pnl']
-            df_ledger.at[idx, 'charges'] = primary['taxes']
-            df_ledger.at[idx, 'net_pnl'] = primary['net_pnl']
-            df_ledger.at[idx, 'return_pct'] = primary['return_pct']
-            df_ledger.at[idx, 'is_win'] = 1 if primary['net_pnl'] > 0 else 0
-            df_ledger.at[idx, 'status'] = 'COMPLETED'
-            df_ledger.at[idx, 'reconciled_at'] = now_ts
+                # Populate Cash Equity fields
+                if res_eq:
+                    df_ledger.at[idx, 'eq_entry_price'] = res_eq['entry_price']
+                    df_ledger.at[idx, 'eq_exit_price'] = res_eq['exit_price']
+                    df_ledger.at[idx, 'eq_gross_pnl'] = res_eq['gross_pnl']
+                    df_ledger.at[idx, 'eq_net_pnl'] = res_eq['net_pnl']
+                    df_ledger.at[idx, 'eq_return_pct'] = res_eq['return_pct']
+                else:
+                    for col in ['eq_entry_price', 'eq_exit_price', 'eq_gross_pnl', 'eq_net_pnl', 'eq_return_pct']:
+                        df_ledger.at[idx, col] = np.nan
 
-            reconciled_dates.add(d)
-            completed_count += 1
+                # Primary ledger fields (prioritize Futures if available, otherwise Cash Equity)
+                primary = res_f1 if res_f1 else res_eq
+
+                df_ledger.at[idx, 'entry_price'] = primary['entry_price']
+                df_ledger.at[idx, 'exit_price'] = primary['exit_price']
+                df_ledger.at[idx, 'entry_time'] = primary['entry_time']
+                df_ledger.at[idx, 'exit_time'] = primary['exit_time']
+                df_ledger.at[idx, 'exit_reason'] = primary['exit_reason']
+                df_ledger.at[idx, 'gross_pnl'] = primary['gross_pnl']
+                df_ledger.at[idx, 'charges'] = primary['taxes']
+                df_ledger.at[idx, 'net_pnl'] = primary['net_pnl']
+                df_ledger.at[idx, 'return_pct'] = primary['return_pct']
+                df_ledger.at[idx, 'is_win'] = 1 if primary['net_pnl'] > 0 else 0
+                df_ledger.at[idx, 'status'] = 'COMPLETED'
+                df_ledger.at[idx, 'reconciled_at'] = now_ts
+
+                reconciled_dates.add(d)
+                completed_count += 1
 
     conn.close()
 
@@ -366,7 +406,7 @@ def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False)
         tg_lines = [
             f"{pnl_color} <b>{tg_header}</b>",
             f"📅 <b>Date:</b> {d} | ⏱️ <b>Audit Time:</b> {now_ts} IST",
-            f"🎯 <b>Holding Window:</b> 09:25 Entry ➔ 0.05% Trailing Profit (09:36–09:39) / 09:40 Square-Off",
+            f"🎯 <b>Strategy:</b> 100% Single-Leg 3-Stage Trail (-₹5,000 SL | +₹2k➔+₹1k Floor | +₹4k+➔Peak-₹750 | 09:36 Cadence)",
             "",
             "<b>📋 EXECUTED TRADES:</b>"
         ]

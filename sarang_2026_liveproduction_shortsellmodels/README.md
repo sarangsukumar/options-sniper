@@ -8,14 +8,18 @@
 
 This branch contains the exact code, models, datasets, and configurations powering the **Live Production Short-Sell Systems** as well as their **1:1 Historical Walk-Forward Simulation Replicas**:
 
-1. **09:20 Scalp Model (Half-Yearly Expanding Retraining + 50/50 Split Execution)**:
-   - High-velocity morning scalp short-selling pipeline (`09:20` Entry to `09:36 / 09:40` Exit).
+1. **09:20 Scalp Model (Half-Yearly Expanding Retraining + 100% Single-Leg 3-Stage Profit Trailing + 5s Live Quotes Engine)**:
+   - High-velocity morning scalp short-selling pipeline (`09:20` Prediction / `09:25` Entry to `09:36 / 09:40` Exit, `₹5,00,000` per stock).
    - **Retraining Cadence:** **Half-Yearly Expanding Walk-Forward (`Jan 1` & `Jul 1` Cutoffs)** via `retrain_monthly_0920_scalp.py` and `run_monthly_retrain.sh` (`00 18 1 1,7 *`).
-   - **Order Fill Logic:** 50/50 Split (50% Market/Best-Bid Fill + 50% Passive Limit 0.10% above 09:20 open).
-   - **Exit Mechanics:** 09:36 dynamic trailing profit-taking (+₹1,500 target threshold) + 09:40 mandatory time square-off.
-   - **Historical Performance (2020–2026):**
-     - ₹5L Capital: **+₹44.27 Lakhs Net PnL**, 75.59% Win Rate, 2.51 Profit Factor.
-     - ₹10L Capital: **+₹70.78 Lakhs Net PnL**, 77.85% Win Rate, 2.40 Profit Factor.
+   - **Order Fill & Live Polling Logic:** `100%` Single-Leg Limit Entry at `09:25:00` (`LTP - 2 ticks`), unfilled orders cancelled at `09:27:00`, followed by **5-Second Kotak `client.quotes()` Sub-Loop Polling (`Option B`)** in `sl_near_alert_monitor.py` (`0s, 5s, 10s` passes per 20s cycle).
+   - **3-Stage Exit & Profit Trailing Mechanics (`₹5L` per stock):**
+     - **Stage 1 (Initial Stop-Loss):** `-₹5,000` (`1.00%` adverse move) while `Peak PnL < +₹2,000`.
+     - **Stage 2 (Minimum Profit Floor):** Once `Peak PnL >= +₹2,000` (`+0.40%`), locks a guaranteed **`+₹1,000` (`+0.20%`)** profit floor.
+     - **Stage 3 (Dynamic Profit Trailing):** Once `Peak PnL >= +₹4,000` (`+0.80%`), dynamically locks **`Peak PnL - ₹750`** (`+₹4,000 ➔ +₹3,250`, `+₹5,000 ➔ +₹4,250`, etc.).
+     - **09:36–09:39:30 Cadence & 09:40 Hard Exit:** 30-second cadence books any open position with `Net PnL >= +₹500`; unconditional limit-chaser cover at `09:40:00`.
+   - **Historical Performance (2020–2026, `5,567` Filled Trades):**
+     - ₹5L Capital: **+₹49.27 Lakhs Net PnL**, **77.82% Win Rate**, **2.91 Profit Factor**, **10.06 Sharpe Ratio**, `-₹0.51L` Max DD.
+     - ₹10L Capital: **+₹101.38 Lakhs Net PnL**, **77.96% Win Rate**, **2.99 Profit Factor**, **10.34 Sharpe Ratio**, `-₹0.98L` Max DD.
 
 2. **09:40 Hybrid Model (Half-Yearly Expanding Retraining + Option A Replacements + 4-Stage Dynamic `3.00% -> 1.50% -> 1.00%` SL Engine)**:
    - Trend-following longer-window short-sell pipeline (`09:42` Entry to `14:30 / 14:45` Exit) on **Cash Equities (`scrapdata`)**.
@@ -36,8 +40,8 @@ This branch contains the exact code, models, datasets, and configurations poweri
      - **Active 4-Stage Dynamic Engine (`3.0% -> 1.5% -> 1.0%` 3-Min SL, `14:45` Exit):** **`+₹99.00 Lakhs Net PnL`** (`+₹74.25L` @ ₹7.5L; **`+₹130.72L` @ ₹10L / `+₹98.04L` @ ₹7.5L** on exact 1:1 tick backtest), **`61.53%` Net WR** (`66.84%` exact ticks), **Max DD `-₹3.28L` (`-43%` drawdown reduction)**, **Sharpe `3.29`**, **Sortino `5.83`**, **Calmar `30.2x`**, Worst Trade capped at **`-₹54,089` (`-64%` tail risk cut)**.
 
 3. **Kotak Neo Live Execution Suite**:
-   - Live order placement bridge (`Neo_shortsell_mis_order.py`) with 50/50 fill execution, cadence order verification, Stage 4 pullback re-entry execution, DB + CSV model ownership checks during square-off, and idempotency checks.
-   - 4-Stage Real-Time Exit & Stop-Loss Proximity Monitor (`sl_near_alert_monitor.py`) enforcing `3.00% -> 1.50% -> 1.00%` 3-minute continuous breach stop-loss and Stages 2–4 profit trailing.
+   - Live order placement bridge (`Neo_shortsell_mis_order.py`) with 100% single-leg entry (`09:20` & `09:40`), cadence order verification (preserving active `09:20` trailing cover orders while PnL `< ₹500`), Stage 4 pullback re-entry execution, DB + CSV model ownership checks during square-off, and idempotency checks.
+   - Real-Time Exit & Stop-Loss Monitor (`sl_near_alert_monitor.py`) with **5-Second Kotak `client.quotes()` Sub-Loop Polling (`Option B`)** for `09:20` 3-stage profit trailing (`-₹5,000` SL, `+₹2,000 -> +₹1,000` Floor, `+₹4,000+ -> Peak - ₹750` Trail) and `09:40` 4-Stage dynamic exit (`3.00% -> 1.50% -> 1.00%` 3-minute continuous breach SL + Stages 2–4 profit trailing).
 
 ---
 
@@ -47,10 +51,10 @@ This branch contains the exact code, models, datasets, and configurations poweri
 sarang_2026_liveproduction_shortsellmodels/
 ├── README.md                                          # Master documentation
 ├── 01_historical_models/                              # 1:1 Backtest and Walk-Forward Verification Replicas
-│   ├── 0920_scalp_model/                              # 09:20 Scalp 50/50 Split Historical Pipeline
+│   ├── 0920_scalp_model/                              # 09:20 Scalp 100% Single-Leg 3-Stage Trailing Historical Pipeline
 │   │   ├── README_5050_PIPELINE.md                    # Detailed 09:20 simulation documentation
 │   │   ├── walkforward_0920_5050_pipeline.py          # Primary walk-forward simulation runner (₹5L & ₹10L)
-│   │   ├── walkforward_0920_simulation.py             # 50/50 verification entrypoint
+│   │   ├── walkforward_0920_simulation.py             # Historical simulation entrypoint
 │   │   ├── walkforward_0920_5050_trades_5L.csv        # Trade-by-trade ledger (5,567 trades, ₹5L)
 │   │   ├── walkforward_0920_5050_trades_10L.csv       # Trade-by-trade ledger (5,567 trades, ₹10L)
 │   │   └── walkforward_0920_5050_yearly_summary.csv   # Year-by-year PnL breakdown
@@ -71,12 +75,13 @@ sarang_2026_liveproduction_shortsellmodels/
 │
 ├── 02_live_production_pipelines/                      # Live Automated Production Runners
 │   ├── 0920_scalp_pipeline/
-│   │   ├── live_0920_scalp_pipeline.py                # Main morning scalp orchestrator (09:18 - 09:25)
+│   │   ├── new_live_0920_pipeline.py                  # Main morning scalp orchestrator (09:20 prediction -> DB insert)
+│   │   ├── live_0920_scalp_pipeline.py                # Legacy morning scalp orchestrator
 │   │   ├── retrain_monthly_0920_scalp.py              # Half-Yearly (Jan 1 & Jul 1) Expanding Retrainer for 09:20
-│   │   ├── confirm_0925_fills.py                      # 09:25 fill confirmator with 50/50 split tracking
+│   │   ├── confirm_0925_fills.py                      # 09:27:00 fill confirmator & 3-stage trailing protection banner
 │   │   ├── exit_0936_check.py                         # 09:36 trailing profit taking check
 │   │   ├── exit_0940_cover.py                         # 09:40 full cover exit manager
-│   │   ├── reconcile_0920_scalp_pnl.py                # Evening PnL reconciler with 50/50 split calculations
+│   │   ├── reconcile_0920_scalp_pnl.py                # Evening PnL reconciler (100% Single-Leg 3-Stage Profit Trailing)
 │   │   └── lgb_0920_scalp_model.txt                   # Production LightGBM model weights (Half-Yearly cutoff)
 │   │
 │   └── 0940_hybrid_pipeline/
@@ -96,7 +101,8 @@ sarang_2026_liveproduction_shortsellmodels/
 │
 └── 03_kotak_execution/                                # Broker Execution Bridge
     ├── Neo_shortsell_mis_order.py                     # Kotak Neo API MIS short sell order & Leg 2 placer
-    ├── sl_near_alert_monitor.py                       # Real-time 4-Stage Exit & Proximity Alert Daemon (3.0->1.5->1.0% SL)
+    ├── sl_near_alert_monitor.py                       # Real-time 5s (09:20) & 20s (09:40) Exit & Proximity Alert Daemon
+    ├── insert_shortsell_orders.py                     # PostgreSQL order queue writer
     └── notify_pipeline_armed.py                       # Morning pipeline armed Telegram notifier
 ```
 
@@ -134,14 +140,17 @@ Evaluated across all **`5,279` Out-of-Sample Trades (`2020-01-01` to `2026-10-30
 | **2026-H2 OOS (`Jul 1 – Oct 30`)** | 305 | **`+₹8.09L` (`55.7%` WR, `-₹2.46L` DD)** | **`+₹6.60L` (`61.0%` WR, `-₹1.00L` DD)** |
 | **Last Week (`Oct 27 – Oct 30`)** | 15 | `-₹1.30L` (`33.3%` WR, `-₹1.48L` DD) | **`-₹0.71L` (`46.7%` WR, `-₹0.74L` DD — saved `+₹0.59L`)** |
 
-### 3. 09:20 Scalp Model (50/50 Order Fill Logic)
-| Metric | ₹5 Lakhs Capital | ₹10 Lakhs Capital |
+### 3. 09:20 Scalp Model (`100%` Single-Leg 3-Stage Profit Trailing: `-₹5K` SL | `+₹2K -> +₹1K` Floor | `+₹4K+ -> Peak - ₹750` Trail)
+| Metric | ₹5 Lakhs Capital (Live Setup) | ₹10 Lakhs Capital (2x Scaled) |
 | :--- | :--- | :--- |
 | **Total Trades** | 5,567 | 5,567 |
-| **Net PnL** | **+₹44.27 Lakhs** | **+₹70.78 Lakhs** |
-| **Win Rate** | **75.59%** (4,208 wins) | **77.85%** (4,334 wins) |
-| **Profit Factor** | **2.51** | **2.40** |
-| **Max Drawdown** | **-₹0.51 Lakhs** | **-₹0.97 Lakhs** |
+| **Net PnL** | **+₹49.27 Lakhs** | **+₹101.38 Lakhs** |
+| **Win Rate** | **77.82%** (4,332 wins) | **77.96%** (4,340 wins) |
+| **Profit Factor** | **2.91** | **2.99** |
+| **Avg Net Trade** | **₹885.0** | **₹1,821.1** |
+| **Max Drawdown** | **-₹0.51 Lakhs** | **-₹0.98 Lakhs** |
+| **Sharpe Ratio** | **10.06** | **10.34** |
+| **Sortino Ratio** | **16.88** | **17.40** |
 
 ---
 
@@ -149,6 +158,9 @@ Evaluated across all **`5,279` Out-of-Sample Trades (`2020-01-01` to `2026-10-30
 
 ### Reproducing Historical Backtests & Pure vs. Dynamic SL Comparisons
 ```bash
+# 09:20 Scalp Historical Walk-Forward Simulation (100% Single-Leg 3-Stage Profit Trailing)
+python3 01_historical_models/0920_scalp_model/walkforward_0920_5050_pipeline.py
+
 # Pure Model (No SL, No Limit, 14:45 Exit) vs Live 4-Stage Dynamic SL (3.0% -> 1.5% -> 1.0%)
 python3 01_historical_models/0940_hybrid_model/sim_0940_pure_1445.py
 

@@ -4,15 +4,15 @@ confirm_0925_fills.py
 =====================
 Runs at exactly 09:27:00 IST (2 minutes after order placement at 09:25:00).
 
-Execution Sequence for 0920_SCALP 50/50 Split:
+Execution Sequence for 0920_SCALP 100% Single-Leg Trailing Strategy (₹5L Plan):
 1. Cancels all unfilled/open SELL limit orders placed at 09:25:00.
 2. Checks Kotak order report and active positions to find which stocks were executed.
-3. For each filled stock, places 50% Leg 1 Resting Limit TP order for ₹2,000 profit target:
-     target_drop = 2000.0 / total_qty
-     tp_price = round_to_tick(filled_price - target_drop)
-     leg1_qty = total_qty // 2
+3. For each filled stock (100% Single-Leg, no 50/50 split), arms the 3-Stage Protection levels:
+     - Stage 1 Initial SL (-₹5,000 / 1.00%): sl_price = round_to_tick(filled_price + min(5000 / qty, filled_price * 0.01))
+     - Stage 2 Profit Floor (+₹2,000 Trigger): Locks +₹1,000 minimum profit once PnL reaches +₹2,000
+     - Stage 3 Dynamic Trail (+₹4,000+ Trigger): Trails Peak PnL by ₹750 (₹4,000 -> ₹3,250, ₹5,000 -> ₹4,250, etc.)
 4. Updates shortsell_orders and scalp_trade_log in the DB.
-5. Sends Telegram alerts for order cancellations and Leg 1 TP placements.
+5. Sends Telegram alerts for order cancellations and Armed Trailing Monitor levels.
 """
 
 import sys
@@ -39,21 +39,20 @@ def get_db():
         autocommit=False
     )
 
+class HiddenPrints:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
+
 def get_kotak_client():
     try:
         import pandas as pd
         from neo_api_client import NeoAPI
         import pyotp
         import os
-        import sys
-
-        class HiddenPrints:
-            def __enter__(self):
-                self._original_stdout = sys.stdout
-                sys.stdout = open(os.devnull, 'w')
-            def __exit__(self, exc_type, exc_val, exc_tb):
-                sys.stdout.close()
-                sys.stdout = self._original_stdout
 
         # Read User_table.csv for user
         user_table_path = '/home/ubuntu/KotakCodes1/User_table.csv'
@@ -178,70 +177,48 @@ def run():
                     notes        = f"Filled @ ₹{filled_price}"
                     log(f"    ✅ FILLED @ ₹{filled_price}")
 
-                    # ── 50/50 Split Strategy: Leg 1 Resting Limit TP ────────────
-                    has_open_buy = False
-                    for oid_k, ko_item in kotak_order_map.items():
-                        if ko_item.get('exSeg') == 'nse_cm' and ko_item.get('trnsTp') in ('B', 'BUY'):
-                            st = str(ko_item.get('ordSt', '')).lower()
-                            if st in ('open', 'pending', 'trigger pending', 'put order req received'):
-                                sym = ko_item.get('trdSym', '') or ko_item.get('sym', '')
-                                clean = sym.replace('-EQ', '').replace('_EQ', '').strip().upper()
-                                if clean == stockname.upper():
-                                    has_open_buy = True
-                                    break
+                    # ── 100% Single-Leg Trailing Protection (₹5L Plan) ────────────
+                    fl_qty_str = ko.get('flQty') or ko.get('flqty') or ko.get('filledQty')
+                    try:
+                        total_qty = int(fl_qty_str) if fl_qty_str else int(quantity)
+                    except:
+                        total_qty = int(quantity)
+                    if total_qty <= 0:
+                        total_qty = max(1, int(quantity))
 
-                    if not has_open_buy and client:
-                        fl_qty_str = ko.get('flQty') or ko.get('flqty') or ko.get('filledQty')
-                        try:
-                            total_qty = int(fl_qty_str) if fl_qty_str else int(quantity)
-                        except:
-                            total_qty = int(quantity)
-                        leg1_qty = total_qty // 2
-                        if leg1_qty <= 0:
-                            leg1_qty = 1
+                    sl_initial_price = min(
+                        round_to_tick(filled_price + (5000.0 / float(total_qty))),
+                        round_to_tick(filled_price * 1.0100)
+                    )
+                    act_2000_price  = round_to_tick(filled_price - (2000.0 / float(total_qty)))
+                    lock_1000_price = round_to_tick(filled_price - (1000.0 / float(total_qty)))
+                    act_4000_price  = round_to_tick(filled_price - (4000.0 / float(total_qty)))
+                    lock_3250_price = round_to_tick(filled_price - (3250.0 / float(total_qty)))
 
-                        tp_target_rs = 2000.0
-                        tp_drop = tp_target_rs / float(total_qty)
-                        tp_price = round_to_tick(filled_price - tp_drop)
-                        if tp_price > 0:
-                            scripcode = find_eq_scripcode(stockname) or f"{stockname}-EQ"
-                            try:
-                                with HiddenPrints():
-                                    resp = client.place_order(
-                                        exchange_segment='nse_cm',
-                                        product='MIS',
-                                        price=str(tp_price),
-                                        order_type='L',
-                                        quantity=str(leg1_qty),
-                                        validity='DAY',
-                                        trading_symbol=scripcode,
-                                        transaction_type='B',
-                                        amo='NO',
-                                        disclosed_quantity='0',
-                                        trigger_price='0'
-                                    )
-                                if resp and (resp.get('stat') == 'Ok' or resp.get('stCode') == 200):
-                                    tp_oid = resp.get('nOrdNo') or resp.get('orderId', '')
-                                    notes += f" | Leg 1 TP placed @ ₹{tp_price} (OID: {tp_oid})"
-                                    log(f"    🎯 Placed Leg 1 TP: {leg1_qty}/{total_qty} qty @ ₹{tp_price} (OID: {tp_oid})")
-                                    send_telegram_alert(
-                                        f"🎯 <b>[09:20 SCALP - 50% LEG 1 LIMIT TP PLACED]</b>\n"
-                                        f"📅 {today} | ⏱️ {datetime.now().strftime('%H:%M:%S IST')}\n"
-                                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                        f"<b>• Stock:</b> <b>{stockname}</b>\n"
-                                        f"<b>• Action:</b> <b>Passive Limit BUY TP</b>\n"
-                                        f"<b>• Sell Fill Price:</b> ₹{filled_price:.2f}\n"
-                                        f"<b>• Target Exit Limit:</b> <b>₹{tp_price:.2f}</b> (-₹{tp_drop:.2f})\n"
-                                        f"<b>• Quantity:</b> {leg1_qty} / {total_qty} (50%)\n"
-                                        f"<b>• Target Profit:</b> <b>₹2,000</b>\n"
-                                        f"<b>• Kotak Order ID:</b> <code>{tp_oid}</code>\n"
-                                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                        f"⚡ <i>Rests on NSE book. Fills passively at zero slippage. Leg 2 (50%) managed from 09:36.</i>"
-                                    )
-                                else:
-                                    log(f"    ⚠️ Leg 1 TP placement returned non-OK status: {resp}")
-                            except Exception as tpe:
-                                log(f"    ⚠️ Leg 1 TP placement failed: {tpe}")
+                    notes += (
+                        f" | 100% Trailing Armed: InitSL=₹{sl_initial_price:.2f} (-₹5k)"
+                        f" | +₹2k->Lock+₹1k (₹{lock_1000_price:.2f})"
+                        f" | +₹4k+->Trail-₹750 (₹{lock_3250_price:.2f})"
+                    )
+                    log(
+                        f"    🛡️ Armed 100% Single-Leg Trailing ({total_qty} qty): "
+                        f"Init SL=₹{sl_initial_price:.2f} (-₹5k) | "
+                        f"+₹2k Act=₹{act_2000_price:.2f} -> Lock +₹1k @ ₹{lock_1000_price:.2f} | "
+                        f"+₹4k Act=₹{act_4000_price:.2f} -> Trail by ₹750"
+                    )
+                    send_telegram_alert(
+                        f"🛡️ <b>[09:20 SCALP - 100% SINGLE-LEG TRAILING ARMED]</b>\n"
+                        f"📅 {today} | ⏱️ {datetime.now().strftime('%H:%M:%S IST')}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"<b>• Stock:</b> <b>{stockname}</b>\n"
+                        f"<b>• Sell Fill Price:</b> <b>₹{filled_price:.2f}</b> | <b>Qty:</b> <b>{total_qty}</b> (100%)\n"
+                        f"<b>• Stage 1 Initial SL (-₹5,000 / 1.00%):</b> <b>₹{sl_initial_price:.2f}</b>\n"
+                        f"<b>• Stage 2 Profit Floor (Reach +₹2,000 @ ₹{act_2000_price:.2f}):</b> Locks <b>+₹1,000</b> @ <b>₹{lock_1000_price:.2f}</b>\n"
+                        f"<b>• Stage 3 Dynamic Trail (Reach +₹4,000+ @ ₹{act_4000_price:.2f}):</b> Trails <b>Peak - ₹750</b> (₹3,250+ @ <b>₹{lock_3250_price:.2f}</b>)\n"
+                        f"<b>• Kotak Sell OID:</b> <code>{broker_id}</code>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"⚡ <i>Monitored every 5s via Kotak Quotes API. 09:36–09:39:30 Cadence (≥+₹500) & 09:40 Hard Exit active.</i>"
+                    )
                 elif ord_status in ('rejected', 'cancelled', 'canceled'):
                     fill_status = 'REJECTED'
                     notes       = f"Kotak status: {ord_status}"
@@ -281,13 +258,14 @@ def run():
                 log(f"    ⚠️  broker_id not in Kotak order book")
 
             with db.cursor() as c:
-                # Update shortsell_orders.filled_price if filled or mark failed
+                # Update shortsell_orders.filled_price and stop_loss_price if filled, or mark failed
                 if fill_status == 'SELL_FILLED':
+                    sl_init_db = min(round_to_tick(filled_price + (5000.0 / max(quantity, 1))), round_to_tick(filled_price * 1.0100))
                     c.execute("""
                         UPDATE shortsell_orders
-                        SET filled_price = %s, isvalid = '2', modtime = NOW()
+                        SET filled_price = %s, stop_loss_price = %s, isvalid = '2', modtime = NOW()
                         WHERE id = %s
-                    """, (filled_price, so_id))
+                    """, (filled_price, sl_init_db, so_id))
                 elif fill_status == 'REJECTED':
                     c.execute("""
                         UPDATE shortsell_orders

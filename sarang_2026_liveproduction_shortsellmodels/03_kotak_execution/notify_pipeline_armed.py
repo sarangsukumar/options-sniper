@@ -8,6 +8,8 @@ to all Telegram monitoring groups when the daily scheduler initiates trading pip
 import sys
 import os
 import requests
+import urllib3.util.connection as urllib3_cn
+urllib3_cn.HAS_IPV6 = False
 from datetime import datetime
 import pytz
 
@@ -56,10 +58,13 @@ def notify_0920():
         f"   2️⃣ ML inference & feature pipeline executing\n"
         f"   3️⃣ Kotak order staging in progress\n"
         f"<b>• Order Entry Time:</b> <b>09:25:00 AM IST</b> (Exact open, -2 ticks entry buffer)\n"
-        f"<b>• Exit Protections Armed:</b>\n"
-        f"   🎯 <b>09:36–09:39 IST:</b> Trailing Profit Square-Off (> ₹500 profit)\n"
+        f"<b>• Exit Protections Armed (100% Single-Leg 3-Stage Trailing):</b>\n"
+        f"   🛡️ <b>Stage 1 (Initial SL):</b> <b>-₹5,000 (1.00%)</b> per stock\n"
+        f"   🔒 <b>Stage 2 (Profit Floor):</b> Peak ≥ <b>+₹2,000</b> ➔ Locks <b>+₹1,000</b> Floor\n"
+        f"   🚀 <b>Stage 3 (Dynamic Trail):</b> Peak ≥ <b>+₹4,000</b> ➔ Locks <b>Peak - ₹750</b> (₹3,250, ₹4,250…)\n"
+        f"   ⏱️ <b>5s Live Monitor (09:27–09:40):</b> 5-second Kotak LTP evaluation + <b>Dynamic Basket SL (0.70% / 0.60%)</b>\n"
+        f"   🎯 <b>09:36–09:39:30 IST:</b> 30s Cadence Profit Square-Off (Net PnL >= ₹500)\n"
         f"   🚨 <b>09:40:00 IST:</b> Hard Limit-Chaser Cover (LTP + 1 tick)\n"
-        f"   🛡️ <b>1-Min Real-time Monitor:</b> 2.0% Stop Loss / ₹5,000 Profit Target\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"⚡ <i>Scheduler Status: Online & Armed via thescheduler.js</i>"
     )
@@ -97,7 +102,7 @@ def notify_0940():
         f"   3️⃣ Orders formulation & DB staging\n"
         f"<b>• Order Entry Time:</b> <b>09:42:00 AM IST</b> (Exact open, -2 ticks entry buffer)\n"
         f"<b>• 4-Stage Dynamic Loss Control & Trailing TP Suite Armed:</b>\n"
-        f"   ⏱️ <b>Stage 1 (Time-Decay SL):</b> 2.25% (09:42–11:00) ➔ 1.50% (11:00–12:30) ➔ 1.00% (12:30–14:45)\n"
+        f"   ⏱️ <b>Stage 1 (Time-Decay SL):</b> 3.00% (09:42–11:00) ➔ 1.50% (11:00–12:30) ➔ 1.00% (12:30–14:45)\n"
         f"   🔒 <b>Stage 2 (Pre-TP Profit Lock):</b> At +1.25% peak profit, SL locks in +0.50% guaranteed profit\n"
         f"   🚀 <b>Stage 3 (Trailing TP Engine):</b> Activates at +2.00% profit (1.75% initial floor, trails 0.50% behind peak)\n"
         f"   🔄 <b>Stage 4 (Leg 2 Re-Entry):</b> Armed on +0.50% bounce from Leg 1 TP exit (before 14:30)\n"
