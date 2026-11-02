@@ -52,7 +52,8 @@ def insert_shortsell_orders(df_top4, model_name, trade_date=None, user_api='MANI
     blocked_stocks  : list of dicts {'stock', 'entry', 'qty', 'reason'} for audit trail
     """
     if trade_date is None:
-        trade_date = datetime.now().strftime('%Y-%m-%d')
+        import pytz
+        trade_date = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
 
     conn = get_db_connection()
     inserted = 0

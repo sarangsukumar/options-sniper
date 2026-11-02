@@ -315,7 +315,10 @@ def reconstruct_lots_from_order_book(client, min_time_str=None, max_time_str=Non
     return lots_summary
 
 def execute_limit_squareoff_order(client, stockname, qty, limit_price, model_name, loss_pct, open_buy_orders, action_type="AUTO SQUARE-OFF", stock_pnl=0.0, **kwargs):
-    now_str = datetime.now().strftime('%H:%M:%S IST')
+    import pytz
+    ist_tz = pytz.timezone('Asia/Kolkata')
+    now_ist = datetime.now(ist_tz)
+    now_str = now_ist.strftime('%H:%M:%S IST')
     
     raw_sym = str(stockname).strip().upper()
     clean_sym = SYMBOL_ALIASES.get(raw_sym, raw_sym)
@@ -377,7 +380,7 @@ def execute_limit_squareoff_order(client, stockname, qty, limit_price, model_nam
         pnl_line = f" (<b>₹{stock_pnl:+,.2f}</b>)" if stock_pnl != 0.0 else ""
         msg = (
             f"{status_emoji} <b>[{model_name} - {action_type} EXECUTED]</b>\n"
-            f"📅 {datetime.now().strftime('%Y-%m-%d')} | ⏱️ {now_str}\n"
+            f"📅 {now_ist.strftime('%Y-%m-%d')} | ⏱️ {now_str}\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"<b>• Stock:</b> <b>{stockname}</b>\n"
             f"<b>• {trigger_label}:</b> <b>{trigger_val}</b>{pnl_line}\n"
@@ -848,7 +851,7 @@ def _run_main_core(ist, now, today_str, now_ts, force_hourly, current_time_int, 
     conn.close()
 
     if not orders:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] No relevant active orders found today. Exiting.")
+        print(f"[{datetime.now(ist).strftime('%H:%M:%S')}] No relevant active orders found today. Exiting.")
         return
 
     # Extract broker order IDs from 0920 scalp model so they are completely excluded from 0940 lot reconstruction
@@ -881,7 +884,7 @@ def _run_main_core(ist, now, today_str, now_ts, force_hourly, current_time_int, 
         }
 
     if not stock_map:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] No active orders for the current time window. Exiting.")
+        print(f"[{datetime.now(ist).strftime('%H:%M:%S')}] No active orders for the current time window. Exiting.")
         return
 
     try:
@@ -1620,9 +1623,9 @@ def _run_main_core(ist, now, today_str, now_ts, force_hourly, current_time_int, 
                 sub_time_int = int(now_sub.strftime('%H%M'))
                 sub_hms_int = int(now_sub.strftime('%H%M%S'))
 
-                # Stop continuous loop at 09:40:00 so mandatory 09:40 square-off chaser takes over cleanly
-                if sub_hms_int >= 94000:
-                    print(f"[{now_sub.strftime('%H:%M:%S')}] 09:40:00 reached. Exiting 2s continuous loop for 09:40 cover chaser.")
+                # Stop continuous loop at 09:39:52 IST (before thescheduler.js 15-min timeout & 09:39:56 square-off chaser)
+                if sub_hms_int >= 93952 or (time.time() - now_ts) >= 880:
+                    print(f"[{now_sub.strftime('%H:%M:%S')}] 09:39:52 IST reached. Exiting 2s continuous loop for 09:40 cover chaser.")
                     break
 
                 # Refresh positions & open buy orders every 3rd pass (~6s), or during 09:25-09:27 entry window, or after an exit order fired

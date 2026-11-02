@@ -712,7 +712,8 @@ def main():
         print("\n✅ Retrain complete. Model saved. Exiting.")
         return
 
-    target_date_str = args.date if args.date else datetime.now().strftime('%Y-%m-%d')
+    import pytz
+    target_date_str = args.date if args.date else datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
     day_name = pd.to_datetime(target_date_str).strftime('%A')
 
 

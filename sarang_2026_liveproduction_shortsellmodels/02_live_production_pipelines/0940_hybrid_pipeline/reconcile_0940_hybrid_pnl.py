@@ -97,7 +97,8 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
     print(f"🔍 Found {len(target_indices)} trade(s) to reconcile across {df_ledger.loc[target_indices, 'date'].nunique()} date(s)...")
 
     conn = get_db_connection()
-    now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    import pytz
+    now_ts = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S')
     reconciled_dates = set()
     completed_count = 0
 

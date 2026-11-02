@@ -18,7 +18,10 @@ Execution Sequence for 0920_SCALP 100% Single-Leg Trailing Strategy (₹5L Plan)
 import sys
 import os
 import pymysql
+import pytz
 from datetime import date, datetime
+
+IST = pytz.timezone('Asia/Kolkata')
 
 sys.path.insert(0, '/home/ubuntu/KotakCodes1')
 from Neo_shortsell_mis_order import find_eq_scripcode, round_to_tick, send_telegram_alert
@@ -26,7 +29,7 @@ from Neo_shortsell_mis_order import find_eq_scripcode, round_to_tick, send_teleg
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cron_0920_scalp.log')
 
 def log(msg):
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')
     line = f"[{ts}] [FILL_CONFIRM] {msg}"
     print(line)
     with open(LOG_FILE, 'a') as f:
@@ -90,7 +93,7 @@ def get_taxes(qty, sell_price, buy_price):
     return round(40.0 + stt + txn + sebi + stamp + gst, 2)
 
 def run():
-    today = date.today().strftime('%Y-%m-%d')
+    today = datetime.now(IST).strftime('%Y-%m-%d')
     log(f"=== Fill Confirmation starting for {today} ===")
 
     # ------------------------------------------------------------------ #
@@ -173,7 +176,7 @@ def run():
                 if ord_status == 'complete' and avg_prc > 0:
                     fill_status  = 'SELL_FILLED'
                     filled_price = round(avg_prc, 2)
-                    fill_time    = datetime.now()
+                    fill_time    = datetime.now(IST).replace(tzinfo=None)
                     notes        = f"Filled @ ₹{filled_price}"
                     log(f"    ✅ FILLED @ ₹{filled_price}")
 
@@ -208,7 +211,7 @@ def run():
                     )
                     send_telegram_alert(
                         f"🛡️ <b>[09:20 SCALP - 100% SINGLE-LEG TRAILING ARMED]</b>\n"
-                        f"📅 {today} | ⏱️ {datetime.now().strftime('%H:%M:%S IST')}\n"
+                        f"📅 {today} | ⏱️ {datetime.now(IST).strftime('%H:%M:%S IST')}\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"<b>• Stock:</b> <b>{stockname}</b>\n"
                         f"<b>• Sell Fill Price:</b> <b>₹{filled_price:.2f}</b> | <b>Qty:</b> <b>{total_qty}</b> (100%)\n"
@@ -217,7 +220,7 @@ def run():
                         f"<b>• Stage 3 Dynamic Trail (Reach +₹4,000+ @ ₹{act_4000_price:.2f}):</b> Trails <b>Peak - ₹750</b> (₹3,250+ @ <b>₹{lock_3250_price:.2f}</b>)\n"
                         f"<b>• Kotak Sell OID:</b> <code>{broker_id}</code>\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"⚡ <i>Monitored every 5s via Kotak Quotes API. 09:36–09:39:30 Cadence (≥+₹500) & 09:40 Hard Exit active.</i>"
+                        f"⚡ <i>Monitored every 2s via Kotak Quotes API. 09:36–09:39:30 Cadence (≥+₹500) & 09:40 Hard Exit active.</i>"
                     )
                 elif ord_status in ('rejected', 'cancelled', 'canceled'):
                     fill_status = 'REJECTED'
@@ -236,7 +239,7 @@ def run():
                             log(f"    🚫 Auto-cancelled open order {broker_id} at 09:27 cutoff")
                             send_telegram_alert(
                                 f"🚫 <b>[09:20 SCALP - UNFILLED SELL CANCELLED]</b>\n"
-                                f"📅 {today} | ⏱️ {datetime.now().strftime('%H:%M:%S IST')}\n"
+                                f"📅 {today} | ⏱️ {datetime.now(IST).strftime('%H:%M:%S IST')}\n"
                                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 f"<b>• Stock:</b> <b>{stockname}</b>\n"
                                 f"<b>• Status:</b> <b>Cancelled at 09:27 Cutoff</b>\n"

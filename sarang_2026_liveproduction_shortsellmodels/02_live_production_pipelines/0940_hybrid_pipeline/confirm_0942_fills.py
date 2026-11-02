@@ -15,14 +15,17 @@ confirms fill status from Kotak API order_report(), then:
 import sys
 import os
 import pymysql
+import pytz
 from datetime import date, datetime
+
+IST = pytz.timezone('Asia/Kolkata')
 
 sys.path.insert(0, '/home/ubuntu/KotakCodes1')
 
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cron_0942_hybrid.log')
 
 def log(msg):
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')
     line = f"[{ts}] [FILL_CONFIRM] {msg}"
     print(line)
     with open(LOG_FILE, 'a') as f:
@@ -87,7 +90,7 @@ def get_taxes(qty, sell_price, buy_price):
     return round(40.0 + stt + txn + sebi + stamp + gst, 2)
 
 def run():
-    today = date.today().strftime('%Y-%m-%d')
+    today = datetime.now(IST).strftime('%Y-%m-%d')
     log(f"=== Fill Confirmation starting for {today} ===")
 
     # ------------------------------------------------------------------ #
@@ -173,7 +176,7 @@ def run():
                     filled_price = round(avg_prc, 2)
                     if fld_qty > 0:
                         quantity = fld_qty
-                    fill_time    = datetime.now()
+                    fill_time    = datetime.now(IST).replace(tzinfo=None)
                     notes        = f"Filled @ ₹{filled_price} (Qty: {quantity})"
                     log(f"    ✅ FILLED @ ₹{filled_price} (Qty: {quantity})")
                 elif fld_qty > 0 and avg_prc > 0:
@@ -187,7 +190,7 @@ def run():
                     fill_status  = 'SELL_FILLED'
                     filled_price = round(avg_prc, 2)
                     quantity     = fld_qty
-                    fill_time    = datetime.now()
+                    fill_time    = datetime.now(IST).replace(tzinfo=None)
                     notes        = f"Partial Fill @ ₹{filled_price} (Qty: {quantity}); remainder cancelled"
                     log(f"    ✅ PARTIAL FILL CONFIRMED @ ₹{filled_price} (Qty: {quantity})")
                 elif ord_status in ('rejected', 'cancelled', 'canceled'):

@@ -509,7 +509,8 @@ def save_predictions(top4, today_str):
     return top4_save
 
 def append_to_pending_ledger(top4, today_str):
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    import pytz
+    now_str = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S')
     new_rows = []
     for idx, row in top4.reset_index(drop=True).iterrows():
         new_rows.append({
@@ -588,7 +589,8 @@ def reconcile_to_ledger(top4, exit_results, today_str):
 # ─── Step 6: Telegram notification ────────────────────────────────────────────────
 def notify_predictions(top4, today_str, dry_run=False):
     from datetime import datetime
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')
+    import pytz
+    now_str = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S IST')
     lines = [
         f"⚡ <b>[09:20 SCALP ENGINE: 100% SINGLE-LEG TRAILING SELECTION]</b>",
         f"📅 <b>Date:</b> {today_str} | ⏱️ <b>Generated:</b> {now_str}",
@@ -649,7 +651,8 @@ def main():
     parser.add_argument('--reconcile',  action='store_true', help='Run only reconcile phase (after market close)')
     args = parser.parse_args()
 
-    today_str = args.date or date.today().strftime('%Y-%m-%d')
+    import pytz
+    today_str = args.date or datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
     print("=" * 80)
     print(f"🚀 NEW 0920 SCALP PIPELINE | {today_str} | dry_run={args.dry_run}")
     print("=" * 80)
