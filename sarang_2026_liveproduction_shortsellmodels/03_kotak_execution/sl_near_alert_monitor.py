@@ -367,6 +367,8 @@ def execute_limit_squareoff_order(client, stockname, qty, limit_price, model_nam
             # If there's an error string or no valid order id, avoid broadcasting false success
             if not isinstance(resp, dict) or 'stat' not in resp:
                 return False
+        else:
+            open_buy_orders[stockname] = {'order_id': str(order_id), 'price': limit_price}
 
         is_profit = ("PROFIT" in action_type.upper() or "TRAIL" in action_type.upper() or "TP" in action_type.upper())
         status_emoji = "🎯" if is_profit else "🚨"
@@ -1588,42 +1590,77 @@ def _run_main_core(ist, now, today_str, now_ts, force_hourly, current_time_int, 
     save_alert_state(alert_state)
 
     # ==========================================
-    # OPTION B: 5-Second Kotak Quotes Sub-Loop for 09:20 Window (Passes at t=5s and t=10s)
-    # Reuses the single active Kotak login session within each 20-second scheduler cycle
+    # CONTINUOUS 2-SECOND KOTAK QUOTES LOOP FOR 09:20 WINDOW (09:25:00 to 09:40:00)
+    # Holds the single authenticated Kotak session in memory and polls client.quotes()
+    # every 2 seconds continuously with in-process client.place_order() execution (~0.15s).
     # ==========================================
     if is_0920_window and not force_hourly:
-        active_0920_stocks = [
+        candidate_0920_stocks = [
             stk for stk, info in stock_map.items()
-            if info.get('is_0920') and stk in broker_positions
-            and not broker_positions[stk].get('is_closed')
-            and broker_positions[stk].get('qty', 0) > 0
+            if info.get('is_0920')
         ]
-        if active_0920_stocks:
-            for sub_pass in (2, 3):
-                time.sleep(5)
+        if candidate_0920_stocks:
+            lock_file_0920 = '/tmp/sl_near_alert_monitor_0920.lock'
+            sub_pass = 1
+            triggered_exit_last_pass = False
+            consecutive_quote_failures = 0
+
+            while True:
+                sub_pass += 1
+                time.sleep(2)
+
+                # Touch lock file heartbeat every 2s so 20s cron watchdog knows loop is healthy
+                if os.path.exists(lock_file_0920):
+                    try:
+                        os.utime(lock_file_0920, None)
+                    except Exception:
+                        pass
+
                 now_sub = datetime.now(ist)
                 sub_time_int = int(now_sub.strftime('%H%M'))
-                if sub_time_int > 940:
+                sub_hms_int = int(now_sub.strftime('%H%M%S'))
+
+                # Stop continuous loop at 09:40:00 so mandatory 09:40 square-off chaser takes over cleanly
+                if sub_hms_int >= 94000:
+                    print(f"[{now_sub.strftime('%H:%M:%S')}] 09:40:00 reached. Exiting 2s continuous loop for 09:40 cover chaser.")
                     break
-                try:
-                    pos_resp_sub = client.positions()
-                    pos_list_sub = pos_resp_sub.get('data', []) if isinstance(pos_resp_sub, dict) else (pos_resp_sub if isinstance(pos_resp_sub, list) else [])
-                    for p in pos_list_sub:
-                        if p.get('prod') != 'MIS':
-                            continue
-                        sym_sub = resolve_stock_aliases(p.get('trdSym', '') or p.get('sym', ''), active_keys=stock_map)
-                        if sym_sub in broker_positions:
-                            fl_sell, cf_sell = int(p.get('flSellQty', 0) or 0), int(p.get('cfSellQty', 0) or 0)
-                            fl_buy, cf_buy   = int(p.get('flBuyQty', 0) or 0), int(p.get('cfBuyQty', 0) or 0)
-                            net_short_sub = (fl_sell + cf_sell) - (fl_buy + cf_buy)
-                            broker_positions[sym_sub]['qty'] = net_short_sub
-                            broker_positions[sym_sub]['is_closed'] = (net_short_sub <= 0 and (fl_sell + cf_sell) > 0)
-                    open_buy_orders = get_open_buy_orders(client)
-                except Exception as sub_e:
-                    print(f"⚠️ [09:20 Sub-Pass {sub_pass}] Position/Order refresh warning: {sub_e}")
+
+                # Refresh positions & open buy orders every 3rd pass (~6s), or during 09:25-09:27 entry window, or after an exit order fired
+                if (sub_pass % 3 == 0) or (sub_hms_int < 92710) or triggered_exit_last_pass:
+                    triggered_exit_last_pass = False
+                    try:
+                        pos_resp_sub = client.positions()
+                        pos_list_sub = pos_resp_sub.get('data', []) if isinstance(pos_resp_sub, dict) else (pos_resp_sub if isinstance(pos_resp_sub, list) else [])
+                        for p in pos_list_sub:
+                            if p.get('prod') != 'MIS':
+                                continue
+                            sym_sub = resolve_stock_aliases(p.get('trdSym', '') or p.get('sym', ''), active_keys=stock_map)
+                            if sym_sub in stock_map and stock_map[sym_sub].get('is_0920'):
+                                fl_sell, cf_sell = int(p.get('flSellQty', 0) or 0), int(p.get('cfSellQty', 0) or 0)
+                                fl_buy, cf_buy   = int(p.get('flBuyQty', 0) or 0), int(p.get('cfBuyQty', 0) or 0)
+                                sell_qty_sub = fl_sell + cf_sell
+                                buy_qty_sub  = fl_buy + cf_buy
+                                net_short_sub = sell_qty_sub - buy_qty_sub
+                                sell_amt_sub = float(p.get('sellAmt', 0) or 0)
+                                avg_sell_sub = round(sell_amt_sub / sell_qty_sub, 2) if sell_qty_sub > 0 else 0.0
+                                if sym_sub not in broker_positions:
+                                    broker_positions[sym_sub] = {
+                                        'qty': net_short_sub,
+                                        'avg_entry': avg_sell_sub if avg_sell_sub > 0 else stock_map[sym_sub].get('entry_price', 0.0),
+                                        'is_closed': (net_short_sub <= 0 and sell_qty_sub > 0)
+                                    }
+                                else:
+                                    broker_positions[sym_sub]['qty'] = net_short_sub
+                                    if avg_sell_sub > 0 and broker_positions[sym_sub].get('avg_entry', 0.0) <= 0:
+                                        broker_positions[sym_sub]['avg_entry'] = avg_sell_sub
+                                    broker_positions[sym_sub]['is_closed'] = (net_short_sub <= 0 and sell_qty_sub > 0)
+                        open_buy_orders = get_open_buy_orders(client)
+                    except Exception as sub_e:
+                        print(f"⚠️ [09:20 2s-Pass {sub_pass}] Position/Order refresh warning: {sub_e}")
 
                 still_open_0920 = 0
-                for stk in active_0920_stocks:
+                valid_quotes_this_pass = 0
+                for stk in candidate_0920_stocks:
                     bp_sub = broker_positions.get(stk, {})
                     if bp_sub.get('is_closed') or bp_sub.get('qty', 0) <= 0:
                         continue
@@ -1631,16 +1668,36 @@ def _run_main_core(ist, now, today_str, now_ts, force_hourly, current_time_int, 
                     ltp_sub = fetch_live_ltp(client, stk)
                     if ltp_sub <= 0:
                         continue
+                    valid_quotes_this_pass += 1
                     stk_state = alert_state.get(stk, {})
-                    evaluate_0920_position(
+                    if stk_state.get('trade_date') != today_str or stk_state.get('active_model') != stock_map[stk]['model_name']:
+                        stk_state = {
+                            'trade_date': today_str,
+                            'active_model': stock_map[stk]['model_name'],
+                            'is_armed_notified': False,
+                            'last_hourly_time': 0
+                        }
+                    fired = evaluate_0920_position(
                         client=client, stk=stk, info=stock_map[stk], broker_pos=bp_sub,
                         stk_state=stk_state, ltp=ltp_sub, current_time_int=sub_time_int,
                         open_buy_orders=open_buy_orders, today_str=today_str, ist=ist
                     )
+                    if fired:
+                        triggered_exit_last_pass = True
                     alert_state[stk] = stk_state
 
                 save_alert_state(alert_state)
-                if still_open_0920 == 0:
+                if still_open_0920 > 0 and valid_quotes_this_pass == 0:
+                    consecutive_quote_failures += 1
+                    if consecutive_quote_failures >= 5:
+                        print(f"⚠️ [{now_sub.strftime('%H:%M:%S')}] 5 consecutive quote failures. Exiting loop to allow fresh login on next cron cycle.")
+                        break
+                else:
+                    consecutive_quote_failures = 0
+
+                # After 09:27:15 (once entry cutoff has passed), exit loop early if all 09:20 positions are closed
+                if still_open_0920 == 0 and sub_hms_int >= 92715:
+                    print(f"[{now_sub.strftime('%H:%M:%S')}] All 09:20 positions closed. Exiting 2s continuous loop.")
                     break
 
     if is_hourly_due and hourly_items:
@@ -1733,7 +1790,7 @@ def main():
         print(f"[{now.strftime('%H:%M:%S IST')}] Outside monitoring windows (09:25-09:40 & 09:43-15:15). Exiting.")
         return
 
-    # Single-instance PID lock during 09:20 5-second sub-loop window to prevent overlapping cron cycles
+    # Single-instance PID + Heartbeat lock during 09:20 2-second continuous loop to prevent overlapping cron cycles
     lock_file = '/tmp/sl_near_alert_monitor_0920.lock'
     acquired_lock = False
     if is_0920_window and not force_hourly:
@@ -1741,8 +1798,8 @@ def main():
             try:
                 with open(lock_file, 'r') as lf:
                     old_pid = int(lf.read().strip() or '0')
-                if old_pid > 0 and os.path.exists(f'/proc/{old_pid}') and (time.time() - os.path.getmtime(lock_file) < 25):
-                    print(f"[{now.strftime('%H:%M:%S IST')}] Active 09:20 5s monitor instance (PID {old_pid}) still running. Skipping overlap.")
+                if old_pid > 0 and os.path.exists(f'/proc/{old_pid}') and (time.time() - os.path.getmtime(lock_file) < 18):
+                    print(f"[{now.strftime('%H:%M:%S IST')}] Active 09:20 2s continuous monitor (PID {old_pid}) running healthy. Skipping overlap.")
                     return
             except Exception:
                 pass
