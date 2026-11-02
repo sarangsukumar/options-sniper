@@ -95,7 +95,7 @@ def notify_0940():
         f"📅 <b>Date:</b> {date_str} ({day_name}) | ⏱️ <b>Time:</b> {time_str}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>• Model:</b> 09:42 Hybrid V6/V7 Rebound-Aware Model\n"
-        f"<b>• Capital Allocation:</b> ₹7,50,000 per stock (Tue–Fri)\n"
+        f"<b>• Capital Allocation:</b> ₹6,25,000 notional / ₹1,25,000 margin per stock (Tue–Fri)\n"
         f"<b>• Current Workflow:</b>\n"
         f"   1️⃣ F1 & Cash tick synchronization (ticks up to 09:40 IST)\n"
         f"   2️⃣ Dual V6/V7 ML inference & Rule 1 pre-entry filtering\n"

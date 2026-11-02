@@ -271,7 +271,7 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
             eq_reason = r.get('eq_exit_reason', '')
             print(f"{i+1:<3} | {stk:<10} | {sig:<16} | {lots:<4} | {f1_n:>10,.2f}   | {f1_reason:<10} | {eq_n:>10,.2f}   | {eq_reason:<10}")
         print("-" * 105)
-        print(f"SUMMARY: Total Setups: 4 (₹7.5L Each) | Futures Net PnL = ₹{day_net_f1:,.2f} | Equity Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate_f1:.1f}%")
+        print(f"SUMMARY: Total Setups: 4 (₹6.25L Notional / ₹1.25L Margin Each) | Futures Net PnL = ₹{day_net_f1:,.2f} | Equity Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate_f1:.1f}%")
         print("=" * 105)
 
         # Telegram Message

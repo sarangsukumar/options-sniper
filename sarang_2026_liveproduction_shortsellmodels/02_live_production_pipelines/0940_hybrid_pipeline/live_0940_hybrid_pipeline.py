@@ -44,7 +44,7 @@ LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0940_live_ledger.csv')
 AUDIT_CSV = os.path.join(BASE_DIR, 'audited_0940_hybrid_trades.csv')
 LOCAL_AUDIT_CSV = os.path.join(SCRIPT_DIR, 'audited_0940_hybrid_trades.csv')
 SARANG_DIR = BASE_DIR
-CAPITAL_PER_TRADE = 750000.0  # ₹7.5 Lakhs per trade allocation
+CAPITAL_PER_TRADE = 625000.0  # ₹6.25 Lakhs per trade notional (₹1.25L actual margin @ 5x MIS)
 
 # 12 Verified Rebound-Aware & Momentum Acceleration Features from Audited Model
 PURE_DB_FEATURES = [
@@ -649,7 +649,7 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
     lines = [
         f"📉 <b>HYBRID SHORT SELL ORDERS ({target_date_str} - {day_name})</b>",
         f"⏰ <b>Entry:</b> 09:42:00 AM IST | <b>Exit:</b> 4-Stage Dynamic Engine (14:45 PM)",
-        f"🛡️ <b>Stop Loss:</b> 3.00% ➔ 1.50% ➔ 1.00% (3-Min Time-Decay) | <b>Budget:</b> Fixed ₹7.5L/Trade",
+        f"🛡️ <b>Stop Loss:</b> 3.00% ➔ 1.50% ➔ 1.00% (3-Min Time-Decay) | <b>Budget:</b> Fixed ₹6.25L/Trade (₹1.25L Margin)",
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
@@ -668,7 +668,7 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
         qty   = int(row.get('total_quantity', int(CAPITAL_PER_TRADE / entry)))
         sig   = row.get('signal_type', 'TOP 4')
         lines.append(f"✅ <b>{stock}</b>  <i>({sig})</i>")
-        lines.append(f"  • <b>Action:</b> SHORT SELL {qty} QTY (₹7.5L Notional)")
+        lines.append(f"  • <b>Action:</b> SHORT SELL {qty} QTY (₹6.25L Notional / ₹1.25L Margin)")
         lines.append(f"  • <b>Entry:</b> ₹{entry:,.2f}  |  <b>Initial SL (3.0%):</b> ₹{sl:,.2f}")
         lines.append(f"------------------------------------")
 
@@ -679,7 +679,7 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
             qty   = b.get('qty', 0)
             sl    = entry * 1.0300 if entry else 0
             lines.append(f"⛔ <b>{b['stock']}</b>  <i>(SKIPPED)</i>")
-            lines.append(f"  • <b>Would have been:</b> SHORT SELL {qty} QTY (₹7.5L Notional)")
+            lines.append(f"  • <b>Would have been:</b> SHORT SELL {qty} QTY (₹6.25L Notional / ₹1.25L Margin)")
             lines.append(f"  • <b>Price:</b> ₹{entry:,.2f}  |  <b>SL:</b> ₹{sl:,.2f}")
             lines.append(f"  • <b>Reason:</b> {b['reason']}")
             lines.append(f"------------------------------------")

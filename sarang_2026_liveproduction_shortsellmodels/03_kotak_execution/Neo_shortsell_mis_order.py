@@ -261,8 +261,7 @@ def adjust_qty_for_kotak_margin(client, stockname, price, db_qty, db_price, mode
     """
     Queries Kotak Neo client.margin_required() before placing an MIS SELL order.
     - 0920_SCALP: ₹5.00L notional @ 5x -> max actual cash margin = ₹1,00,000 per stock.
-    - 0942_HYBRID: ₹7.50L notional (4 stocks) @ 5x -> max actual cash margin = ₹1,50,000 per stock
-                   (or ₹10.00L notional for 1-3 stocks @ 5x -> ₹2,00,000 per stock).
+    - 0942_HYBRID: ₹6.25L notional (4 stocks) @ 5x -> max actual cash margin = ₹1,25,000 per stock.
     If a stock has lower leverage in Kotak (e.g., 3x / 33.33% margin like UBL instead of 5x / 20%),
     caps quantity so actual cash margin required (ordMrgn) stays within max_actual_margin.
     Normal 5x leverage stocks are 100% untouched. Wrapped in full try/except fallback.
@@ -278,8 +277,8 @@ def adjust_qty_for_kotak_margin(client, stockname, price, db_qty, db_price, mode
         if model_name == '0920_SCALP':
             max_actual_margin = 100000.0  # ₹1.00 Lakh actual margin req (₹5L notional @ 5x)
         elif model_name == '0942_HYBRID':
-            # ₹1.50 Lakh actual margin for 4 stocks (₹7.5L notional), or ₹2.00 Lakh for 1-3 stocks (₹10L notional)
-            max_actual_margin = 200000.0 if planned_notional > 850000.0 else 150000.0
+            # ₹1.25 Lakh actual margin per stock (₹6.25L notional @ 5x)
+            max_actual_margin = 125000.0
         else:
             max_actual_margin = max(100000.0, round(planned_notional / 5.0, 2))
 
@@ -1059,7 +1058,7 @@ def _run_reentry_orders(model_name, today, target_stock=None, target_qty=None, t
                 continue
 
             if not quantity or quantity <= 0:
-                quantity = int(500000 // price) # ₹5L capital rule
+                quantity = int(625000 // price) if '094' in str(model_filter) or 'HYBRID' in str(model_filter) else int(500000 // price) # ₹6.25L (₹1.25L margin) for 0942_HYBRID, ₹5L for 0920_SCALP
 
             limit_price_fmt = str(round_to_tick(price))
             scripcode = find_eq_scripcode(stockname) or stockname
