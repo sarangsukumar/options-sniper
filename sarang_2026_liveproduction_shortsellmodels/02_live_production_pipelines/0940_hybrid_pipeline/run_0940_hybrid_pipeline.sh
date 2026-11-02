@@ -36,7 +36,7 @@ PREV_TRADING_DATE=$(python3 -c "
 import pymysql
 conn = pymysql.connect(host='localhost', user='root', password='root', database='markets')
 c = conn.cursor()
-c.execute(\"SELECT MAX(date) FROM scrapdata_F1 WHERE date < '$TODAY_DATE'\")
+c.execute(\"SELECT MAX(date) FROM scrapdata WHERE date < '$TODAY_DATE'\")
 row = c.fetchone()
 print(str(row[0]) if row and row[0] else '$TODAY_DATE')
 conn.close()
@@ -45,28 +45,18 @@ conn.close()
 echo "• Today Date        : $TODAY_DATE" >> "$LOG_FILE"
 echo "• Prev Trading Date : $PREV_TRADING_DATE" >> "$LOG_FILE"
 
-# Step 1A: Download latest F1 ticks up to 09:40 into scrapdata_F1
-echo "[Step 1A/2] Fetching F1 ticks up to 09:40 AM into scrapdata_F1..." >> "$LOG_FILE"
-cd /home/ubuntu/daily_prediction_sytem_Dynamic_threshold
-rm -f pipeline/checkpoint_F1*.json
-if node pipeline/8.icicidatawithsession_F1.js "$TODAY_DATE" "$TODAY_DATE" >> "$LOG_FILE" 2>&1; then
-    echo "✔ Step 1A (F1 Ticks Downloader) completed successfully." >> "$LOG_FILE"
-else
-    echo "⚠️ Warning: Step 1A encountered an issue — continuing with existing F1 DB ticks." >> "$LOG_FILE"
-fi
-
-# Step 1B: Download latest Cash (EQ) ticks up to 09:40 into scrapdata
-echo "[Step 1B/2] Fetching Cash (EQ) ticks up to 09:40 AM into scrapdata (for Rule 1 simulation consistency)..." >> "$LOG_FILE"
+# Step 1: Download latest Cash (EQ) ticks up to 09:40 into scrapdata (used by live_0940_hybrid_pipeline.py)
+echo "[Step 1/3] Fetching Cash (EQ) ticks up to 09:40 AM into scrapdata..." >> "$LOG_FILE"
 rm -f /home/ubuntu/live_trading_setup_2026/checkpoint*.json
-# Run the EQ downloader sequentially to avoid ICICI session/rate limit conflicts
+# Run the EQ downloader first so ML prediction finishes before 09:42:00 IST
 if node /home/ubuntu/live_trading_setup_2026/3.icicidatawithsession_EQ.js "$TODAY_DATE" "$TODAY_DATE" "EQ" >> "$LOG_FILE" 2>&1; then
-    echo "✔ Step 1B (EQ Ticks Downloader) completed successfully." >> "$LOG_FILE"
+    echo "✔ Step 1 (EQ Ticks Downloader) completed successfully." >> "$LOG_FILE"
 else
-    echo "⚠️ Warning: Step 1B encountered an issue — Cash Rule 1 filter might skip stocks." >> "$LOG_FILE"
+    echo "⚠️ Warning: Step 1 encountered an issue — Cash Rule 1 filter might skip stocks." >> "$LOG_FILE"
 fi
 
 # Step 2: Run 09:40 Hybrid ML Pipeline & Dispatch Telegram Alert
-echo "[Step 2/2] Running 09:40 Hybrid ML Pipeline & Order Formulator..." >> "$LOG_FILE"
+echo "[Step 2/3] Running 09:40 Hybrid ML Pipeline & Order Formulator..." >> "$LOG_FILE"
 cd "$DIR"
 if python3 live_0940_hybrid_pipeline.py >> "$LOG_FILE" 2>&1; then
     echo "✔ Step 2 (09:40 Hybrid ML Pipeline) completed successfully." >> "$LOG_FILE"
@@ -88,6 +78,16 @@ if python3 Neo_shortsell_mis_order.py 0942_HYBRID >> "$LOG_FILE" 2>&1; then
     echo "✔ Step 3 (Order Placement) completed successfully." >> "$LOG_FILE"
 else
     echo "❌ Error: Step 3 (Order Placement) failed." >> "$LOG_FILE"
+fi
+
+# Step 4 (Post-Entry Background Sync): Download F1 ticks into scrapdata_F1 for evening reconciliation
+echo "[Step 4] Syncing F1 ticks into scrapdata_F1 (post-order placement)..." >> "$LOG_FILE"
+cd /home/ubuntu/daily_prediction_sytem_Dynamic_threshold
+rm -f pipeline/checkpoint_F1*.json
+if node pipeline/8.icicidatawithsession_F1.js "$TODAY_DATE" "$TODAY_DATE" >> "$LOG_FILE" 2>&1; then
+    echo "✔ Step 4 (F1 Ticks Downloader) completed successfully." >> "$LOG_FILE"
+else
+    echo "⚠️ Warning: Step 4 encountered an issue — continuing." >> "$LOG_FILE"
 fi
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] 🎉 09:41 AM Hybrid Short-Sell Pipeline Finished Successfully." >> "$LOG_FILE"

@@ -110,13 +110,34 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
             lotsize = int(row['lotsize']) if 'lotsize' in row and not pd.isna(row['lotsize']) else (int(row['total_quantity']) // int(row['lots_to_trade']))
             total_qty = int(row['total_quantity']) if 'total_quantity' in row and not pd.isna(row['total_quantity']) else lots_to_trade * lotsize
 
+            # Sync margin-adjusted quantity and filled_price from shortsell_orders if present
+            live_filled_ep = None
+            try:
+                cursor.execute(f"""
+                    SELECT filled_price, quantity
+                    FROM shortsell_orders
+                    WHERE trade_date = '{d}' AND stockname = '{s}'
+                      AND model_name LIKE '%0942%'
+                      AND isvalid NOT IN ('FALSE', 'REJECTED')
+                    ORDER BY id DESC LIMIT 1
+                """)
+                ord_row = cursor.fetchone()
+                if ord_row and ord_row.get('filled_price') and float(ord_row['filled_price']) > 0:
+                    live_filled_ep = float(ord_row['filled_price'])
+                if ord_row and ord_row.get('quantity') and int(ord_row['quantity']) > 0:
+                    total_qty = int(ord_row['quantity'])
+                    df_ledger.loc[idx, 'total_quantity'] = total_qty
+            except Exception:
+                pass
+
             # 1. Query scrapdata_F1 between 09:42:00 and 14:45:00
             q_f1 = f"""
-            SELECT time, CAST(price AS DECIMAL(10,2)) as price
+            SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
             FROM scrapdata_F1
             WHERE date = '{d}' AND stockname = '{s}'
               AND TIME(time) >= '09:42:00' AND TIME(time) <= '14:45:00'
-              AND isvalid = 'TRUE'
+              AND price IS NOT NULL AND price > 0
+              AND (isvalid = 'TRUE' OR isvalid IS NULL OR isvalid = '1' OR isvalid = '')
             ORDER BY time ASC
             """
             cursor.execute(q_f1)
@@ -124,11 +145,12 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
 
             # 2. Query scrapdata (Cash Equity) between 09:42:00 and 14:45:00
             q_eq = f"""
-            SELECT time, CAST(price AS DECIMAL(10,2)) as price
+            SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
             FROM scrapdata
             WHERE date = '{d}' AND stockname = '{s}'
               AND TIME(time) >= '09:42:00' AND TIME(time) <= '14:45:00'
-              AND isvalid = 'TRUE'
+              AND price IS NOT NULL AND price > 0
+              AND (isvalid = 'TRUE' OR isvalid IS NULL OR isvalid = '1' OR isvalid = '')
             ORDER BY time ASC
             """
             cursor.execute(q_eq)
@@ -138,82 +160,45 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
                 print(f"⚠️ No tick data found for {s} on {d} in both scrapdata_F1 and scrapdata. Leaving as PENDING.")
                 continue
 
-            # Simulate Futures (F1) with 3-Minute Consecutive Breach Check
-            f1_entry_p, f1_exit_p, f1_exit_time, f1_exit_reason, f1_net_pnl, f1_ret_pct = None, None, None, None, None, None
-            if ticks_f1:
-                f1_entry_p = float(ticks_f1[0]['price'])
-                f1_sl = round(f1_entry_p * 1.0225, 2)
-                f1_exit_p = float(ticks_f1[-1]['price'])
-                f1_exit_time = '14:45:00'
-                f1_exit_reason = 'TIME_EXIT'
-                f1_breaches = 0
-                for t in ticks_f1:
-                    p = float(t['price'])
-                    if p >= f1_sl:
-                        f1_breaches += 1
-                        if f1_breaches >= 3:
-                            f1_exit_p = p
-                            f1_exit_time = str(t['time']).split()[-1]
-                            f1_exit_reason = 'STOP_LOSS_3MIN'
-                            break
-                    else:
-                        f1_breaches = 0
-                f1_pts = round(f1_entry_p - f1_exit_p, 2)
-                f1_gross = round(f1_pts * total_qty, 2)
-                f1_charges = get_taxes(total_qty, f1_entry_p, f1_exit_p)
-                f1_net_pnl = round(f1_gross - f1_charges, 2)
-                f1_ret_pct = round((f1_pts / f1_entry_p) * 100.0, 2) if f1_entry_p > 0 else 0.0
+            from reconcile_0940_live_mimic_pnl import simulate_sim3_live_4stage_engine
 
-                df_ledger.loc[idx, 'f1_entry_price'] = f1_entry_p
+            res_f1 = simulate_sim3_live_4stage_engine(ticks_f1, total_qty, override_ep=live_filled_ep) if ticks_f1 else None
+            res_eq = simulate_sim3_live_4stage_engine(ticks_eq, total_qty, override_ep=live_filled_ep) if ticks_eq else None
+
+            if not res_f1 and not res_eq:
+                print(f"⚠️ Could not simulate 4-Stage engine for {s} on {d}. Leaving as PENDING.")
+                continue
+
+            if res_f1:
+                f1_exit_p = res_f1['leg2_exit_price'] if res_f1['has_leg2'] else res_f1['leg1_exit_price']
+                f1_exit_reason = f"{res_f1['leg1_exit_reason']}+{res_f1['leg2_exit_reason']}" if res_f1['has_leg2'] else res_f1['leg1_exit_reason']
+                df_ledger.loc[idx, 'f1_entry_price'] = res_f1['entry_price']
                 df_ledger.loc[idx, 'f1_exit_price'] = f1_exit_p
                 df_ledger.loc[idx, 'f1_exit_reason'] = f1_exit_reason
-                df_ledger.loc[idx, 'f1_net_pnl'] = f1_net_pnl
-                df_ledger.loc[idx, 'f1_return_pct'] = f1_ret_pct
+                df_ledger.loc[idx, 'f1_net_pnl'] = res_f1['net_pnl']
+                df_ledger.loc[idx, 'f1_return_pct'] = res_f1['return_pct']
 
-            # Simulate Cash Equity (EQ) with 3-Minute Consecutive Breach Check
-            eq_entry_p, eq_exit_p, eq_exit_time, eq_exit_reason, eq_net_pnl, eq_ret_pct = None, None, None, None, None, None
-            if ticks_eq:
-                eq_entry_p = float(ticks_eq[0]['price'])
-                eq_sl = round(eq_entry_p * 1.0225, 2)
-                eq_exit_p = float(ticks_eq[-1]['price'])
-                eq_exit_time = '14:45:00'
-                eq_exit_reason = 'TIME_EXIT'
-                eq_breaches = 0
-                for t in ticks_eq:
-                    p = float(t['price'])
-                    if p >= eq_sl:
-                        eq_breaches += 1
-                        if eq_breaches >= 3:
-                            eq_exit_p = p
-                            eq_exit_time = str(t['time']).split()[-1]
-                            eq_exit_reason = 'STOP_LOSS_3MIN'
-                            break
-                    else:
-                        eq_breaches = 0
-                eq_pts = round(eq_entry_p - eq_exit_p, 2)
-                eq_gross = round(eq_pts * total_qty, 2)
-                eq_charges = get_taxes(total_qty, eq_entry_p, eq_exit_p)
-                eq_net_pnl = round(eq_gross - eq_charges, 2)
-                eq_ret_pct = round((eq_pts / eq_entry_p) * 100.0, 2) if eq_entry_p > 0 else 0.0
-
-                df_ledger.loc[idx, 'eq_entry_price'] = eq_entry_p
+            if res_eq:
+                eq_exit_p = res_eq['leg2_exit_price'] if res_eq['has_leg2'] else res_eq['leg1_exit_price']
+                eq_exit_reason = f"{res_eq['leg1_exit_reason']}+{res_eq['leg2_exit_reason']}" if res_eq['has_leg2'] else res_eq['leg1_exit_reason']
+                df_ledger.loc[idx, 'eq_entry_price'] = res_eq['entry_price']
                 df_ledger.loc[idx, 'eq_exit_price'] = eq_exit_p
                 df_ledger.loc[idx, 'eq_exit_reason'] = eq_exit_reason
-                df_ledger.loc[idx, 'eq_net_pnl'] = eq_net_pnl
-                df_ledger.loc[idx, 'eq_return_pct'] = eq_ret_pct
+                df_ledger.loc[idx, 'eq_net_pnl'] = res_eq['net_pnl']
+                df_ledger.loc[idx, 'eq_return_pct'] = res_eq['return_pct']
 
             # Primary columns (prioritize Cash Equity scrapdata since live trading is on EQ, fallback to Futures)
-            use_eq = (eq_entry_p is not None)
-            p_entry = eq_entry_p if use_eq else f1_entry_p
-            p_sl = round(p_entry * 1.0225, 2)
-            p_exit = eq_exit_p if use_eq else f1_exit_p
-            p_exit_time = eq_exit_time if use_eq else f1_exit_time
-            p_exit_reason = eq_exit_reason if use_eq else f1_exit_reason
-            p_pts = round(p_entry - p_exit, 2)
-            p_gross = round(p_pts * total_qty, 2)
-            p_charges = round(300.0 * lots_to_trade, 2)
-            p_net = round(p_gross - p_charges, 2)
-            p_ret = round((p_pts / p_entry) * 100.0, 2) if p_entry > 0 else 0.0
+            primary = res_eq if res_eq else res_f1
+            p_entry = primary['entry_price']
+            p_sl = round(p_entry * 1.0300, 2)
+            p_exit = primary['leg2_exit_price'] if primary['has_leg2'] else primary['leg1_exit_price']
+            p_exit_time = primary['leg2_exit_time'] if primary['has_leg2'] else primary['leg1_exit_time']
+            p_exit_reason = f"{primary['leg1_exit_reason']}+{primary['leg2_exit_reason']}" if primary['has_leg2'] else primary['leg1_exit_reason']
+            p_pts = round(primary['gross_pnl'] / total_qty, 2) if total_qty > 0 else round(p_entry - p_exit, 2)
+            p_gross = primary['gross_pnl']
+            p_charges = primary['charges']
+            p_net = primary['net_pnl']
+            p_ret = primary['return_pct']
 
             df_ledger.loc[idx, 'entry_price'] = p_entry
             df_ledger.loc[idx, 'stop_loss_2_25pct'] = p_sl
@@ -292,8 +277,8 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
         tg_lines = [
             f"{pnl_color} <b>[09:40 HYBRID: RECONCILED PNL REPORT]</b>",
             f"📅 <b>Date:</b> {d} | ⏱️ <b>Audit Time:</b> {now_ts} IST",
-            f"🎯 <b>Holding Window:</b> 09:42 AM ➔ 14:45 PM (Fixed 1-Lot Budget)",
-            f"🛡️ <b>Risk Protection:</b> Tick-by-Tick 2.25% Stop Loss Monitored",
+            f"🎯 <b>Holding Window:</b> 09:42 AM ➔ 14:45 PM (4-Stage Dynamic Exit Engine)",
+            f"🛡️ <b>Risk Protection:</b> Stage-1 Time-Decay SL (3.00% ➔ 1.50% @ 11:00 ➔ 1.00% @ 12:30, 3-Min) | Stage-2 Lock (+1.25% ➔ +0.50%) | Stage-3 Trail TP (+2.00%)",
             "",
             "<b>📋 EXECUTED TRADES (FUTURES vs CASH EQUITY):</b>"
         ]
@@ -303,12 +288,12 @@ def reconcile_hybrid_trades(target_date=None, force_all=False, no_telegram=False
             f1_n = r.get('f1_net_pnl', r.get('net_pnl', 0.0))
             f1_ret = r.get('f1_return_pct', r.get('return_pct', 0.0))
             f1_reason = r.get('f1_exit_reason', r.get('exit_reason', ''))
-            f1_badge = " [SL HIT]" if f1_reason == 'STOP_LOSS' else " [14:45]"
+            f1_badge = f" [{f1_reason}]"
 
             eq_n = r.get('eq_net_pnl', 0.0)
             eq_ret = r.get('eq_return_pct', 0.0)
             eq_reason = r.get('eq_exit_reason', '')
-            eq_badge = " [SL HIT]" if eq_reason == 'STOP_LOSS' else " [14:45]"
+            eq_badge = f" [{eq_reason}]"
 
             tg_lines.append(
                 f"  {t_icon} <b>#{i+1} {stk_name}</b> ({r['signal_type']} | {int(r['lots_to_trade'])} Lots):\n"

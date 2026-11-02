@@ -34,35 +34,21 @@ warnings.filterwarnings('ignore')
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_FILE   = os.path.join(SCRIPT_DIR, 'data', 'scalp_0920_ml_dataset.csv.gz')
+LIVE_OUT_FILE = os.path.join(SCRIPT_DIR, 'live_production', 'data', 'scalp_0920_ml_dataset.csv.gz')
 os.makedirs(os.path.join(SCRIPT_DIR, 'data'), exist_ok=True)
+os.makedirs(os.path.join(SCRIPT_DIR, 'live_production', 'data'), exist_ok=True)
 
-# Official NSE F&O Universe (180+ Liquid Contract Stocks)
-VALID_STOCKS = [
-    'AARTIIND', 'ABB', 'ABBOTINDIA', 'ABCAPITAL', 'ABFRL', 'ACC', 'ADANIENT', 'ADANIPORTS',
-    'ALKEM', 'AMBUJACEM', 'APOLLOHOSP', 'APOLLOTYRE', 'ASHOKLEY', 'ASIANPAINT', 'ASTRAL',
-    'ATUL', 'AUBANK', 'AUROPHARMA', 'AXISBANK', 'BAJAJ-AUTO', 'BAJAJFINSV', 'BAJFINANCE',
-    'BALKRISIND', 'BALRAMCHIN', 'BANDHANBNK', 'BANKBARODA', 'BATAINDIA', 'BEL', 'BERGEPAINT',
-    'BHARATFORG', 'BHARTIARTL', 'BHEL', 'BIOCON', 'BOSCHLTD', 'BPCL', 'BRITANNIA', 'BSOFT',
-    'CANBK', 'CANFINHOME', 'CHAMBLFERT', 'CHOLAFIN', 'CIPLA', 'COALINDIA', 'COFORGE', 'COLPAL',
-    'CONCOR', 'COROMANDEL', 'CROMPTON', 'CUB', 'CUMMINSIND', 'DABUR', 'DALBHARAT', 'DEEPAKNTR',
-    'DELTACORP', 'DIVISLAB', 'DIXON', 'DLF', 'DRREDDY', 'EICHERMOT', 'ESCORTS', 'EXIDEIND',
-    'FEDERALBNK', 'GAIL', 'GLENMARK', 'GMRINFRA', 'GNFC', 'GODREJCP', 'GODREJPROP', 'GRANULES',
-    'GRASIM', 'GUJGASLTD', 'HAL', 'HAVELLS', 'HCLTECH', 'HDFCAMC', 'HDFCBANK', 'HDFCLIFE',
-    'HEROMOTOCO', 'HINDALCO', 'HINDCOPPER', 'HINDPETRO', 'HINDUNILVR', 'IBULHSGFIN', 'ICICIBANK',
-    'ICICIGI', 'ICICIPRULI', 'IDEA', 'IDFC', 'IDFCFIRSTB', 'IEX', 'IGL', 'INDHOTEL', 'INDIACEM',
-    'INDIAMART', 'INDIGO', 'INDUSINDBK', 'INDUSTOWER', 'INFY', 'IOC', 'IPCALAB', 'IRCTC', 'ITC',
-    'JINDALSTEL', 'JKCEMENT', 'JSWSTEEL', 'JUBLFOOD', 'KOTAKBANK', 'L&TFH', 'LALPATHLAB',
-    'LAURUSLABS', 'LICHSGFIN', 'LT', 'LTF', 'LTIM', 'LTTS', 'LUPIN', 'M&M', 'M&MFIN', 'MANAPPURAM',
-    'MARICO', 'MARUTI', 'MCDOWELL-N', 'MCX', 'METROPOLIS', 'MFSL', 'MGL', 'MOTHERSON', 'MPHASIS',
-    'MRF', 'MUTHOOTFIN', 'NATIONALUM', 'NAUKRI', 'NAVINFLUOR', 'NESTLEIND', 'NMDC', 'NTPC',
-    'OBEROIRLTY', 'OFSS', 'ONGC', 'PAGEIND', 'PEL', 'PERSISTENT', 'PETRONET', 'PFC', 'PIDILITIND',
-    'PIIND', 'PNB', 'POLYCAB', 'POWERGRID', 'PVRINOX', 'RAMCOCEM', 'RBLBANK', 'RECLTD', 'RELIANCE',
-    'SAIL', 'SBICARD', 'SBILIFE', 'SBIN', 'SHREECEM', 'SHRIRAMFIN', 'SIEMENS', 'SRF', 'SUNPHARMA',
-    'SUNTV', 'SYNGENE', 'TATACHEM', 'TATACOMM', 'TATACONSUM', 'TATAMOTORS', 'TATAPOWER', 'TATASTEEL',
-    'TCS', 'TECHM', 'TITAN', 'TORNTPHARM', 'TRENT', 'TVSMOTOR', 'UBL', 'ULTRACEMCO', 'UNITDSPR',
-    'UPL', 'VEDL', 'VOLTAS', 'WIPRO', 'ZEEL', 'ZYDUSLIFE'
-]
-VALID_SET = set(VALID_STOCKS)
+# Dynamic historical F&O Universe to eliminate Survivorship Bias
+LOTSIZE_FILE = '/home/ubuntu/intraday_simulation/historical_lotsize_new.csv'
+print(f"Loading historical F&O universe from {LOTSIZE_FILE}...")
+df_fo = pd.read_csv(LOTSIZE_FILE)
+df_fo['expdate'] = pd.to_datetime(df_fo['expdate'], format='%d/%m/%Y')
+df_fo['exp_period'] = df_fo['expdate'].dt.to_period('M')
+
+def get_active_fo_stocks(target_date_str):
+    target_period = pd.to_datetime(target_date_str).to_period('M')
+    active_stocks = df_fo[df_fo['exp_period'] == target_period]['stockname'].unique()
+    return set([str(s).strip().upper() for s in active_stocks])
 
 def get_conn():
     return pymysql.connect(
@@ -108,7 +94,7 @@ def extract_features():
     cur = conn.cursor()
 
     # Query all available dates from MySQL
-    cur.execute("SELECT DISTINCT date FROM scrapdata WHERE date >= '2015-01-01' ORDER BY date ASC")
+    cur.execute("SELECT DISTINCT date FROM scrapdata WHERE date >= '2022-01-01' ORDER BY date ASC")
     all_dates = [str(r['date']) for r in cur.fetchall()]
 
     if existing_df is not None:
@@ -179,7 +165,8 @@ def extract_features():
             if stk not in today_pnl: today_pnl[stk] = []
             today_pnl[stk].append(r)
 
-        for stock in VALID_STOCKS:
+        active_stocks = get_active_fo_stocks(target_date)
+        for stock in active_stocks:
             if stock not in today_morn or stock not in pday or stock not in today_pnl:
                 continue
 
@@ -235,7 +222,7 @@ def extract_features():
 
             sl_price = entry_price * 1.03
             exit_price = 0
-            qty = int(1000000.0 / entry_price)
+            qty = int(500000.0 / entry_price)
 
             for t in pnl_ticks:
                 p = float(t['price'])
@@ -276,8 +263,10 @@ def extract_features():
     else:
         combined = new_df
 
+    combined = combined.drop_duplicates(subset=['short_date', 'clean_stock'])
     combined.to_csv(OUT_FILE, index=False, compression='gzip')
-    print(f"✅ Success! Updated dataset: {len(combined):,} total rows saved to {OUT_FILE}")
+    combined.to_csv(LIVE_OUT_FILE, index=False, compression='gzip')
+    print(f"✅ Success! Updated dataset: {len(combined):,} total rows saved to {OUT_FILE} and {LIVE_OUT_FILE}")
 
 if __name__ == '__main__':
     extract_features()

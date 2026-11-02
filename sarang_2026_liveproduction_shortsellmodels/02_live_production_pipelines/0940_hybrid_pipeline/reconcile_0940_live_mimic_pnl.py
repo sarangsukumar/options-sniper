@@ -17,7 +17,7 @@ Evening 3-Simulation Reconciler for the 09:40 / 09:42 Hybrid Short-Sell Model:
 
   • SIMULATION 3: LIVE 4-STAGE DYNAMIC ENGINE (CURRENT LIVE STRATEGY)
       - Stage 1 (Time-Decay SL, 3-Min Consecutive Breach):
-          • 09:42 – 10:59: 2.25% SL (ep * 1.0225)
+          • 09:42 – 10:59: 3.00% SL (ep * 1.0300)
           • 11:00 – 12:29: 1.50% SL (ep * 1.0150)
           • 12:30 – 14:45: 1.00% SL (ep * 1.0100)
           Requires 3 consecutive 1-minute breaches (resets to 0 if price recovers below SL).
@@ -37,9 +37,12 @@ Evening 3-Simulation Reconciler for the 09:40 / 09:42 Hybrid Short-Sell Model:
 
 import os
 import sys
+import time
 import argparse
 import subprocess
 import requests
+import urllib3.util.connection as urllib3_cn
+urllib3_cn.HAS_IPV6 = False
 from datetime import datetime
 import pytz
 import numpy as np
@@ -52,6 +55,8 @@ MIMIC_LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0940_live_mimic_ledger.csv')
 AUDITED_MIMIC_CSV = os.path.join(SCRIPT_DIR, 'audited_0940_live_mimic_trades.csv')
 SARANG_DIR = '/home/ubuntu/sarang_2026_shortsell_algos/02_Best_Longer_Window_0942_1445'
 BOT_SCRIPT = '/home/ubuntu/KotakCodes1/status_Info_bot.js'
+STATUS_BOT_TOKEN = "7920868588:AAE4mPlDQJWnkv9CbmHO8idiSBVnP7K0Gko"
+STATUS_CHAT_ID = "-1002365534285"
 
 TELEGRAM_GROUPS = [
     ("5350311365:AAFkTUBR4IGvgS5Z9mJngz-mgk7-HkhFEYE", "-627025839", "kotak_Critical Alerts"),
@@ -78,28 +83,50 @@ def get_db_connection():
     )
 
 def send_telegram_alert(msg):
-    # 1. Send via status_Info_bot.js to Status and Warnings (-1002365534285)
+    # 1. Send via status_Info_bot.js to Status and Warnings (-1002365534285) with direct IPv4 fallback
+    status_sent = False
     if os.path.exists(BOT_SCRIPT):
         try:
-            res = subprocess.run(['node', BOT_SCRIPT, msg], capture_output=True, text=True, timeout=20)
-            print(f"[Telegram Bot Response - Status & Warnings]: {res.stdout.strip()[:100]}")
+            res = subprocess.run(['node', BOT_SCRIPT, msg], capture_output=True, text=True, timeout=35)
+            out_str = res.stdout.strip()
+            print(f"[Telegram Bot Response - Status & Warnings]: {out_str[:100]}")
+            if res.returncode == 0 and "Message sent successfully" in out_str:
+                status_sent = True
         except Exception as e:
-            print(f"⚠️ Telegram notification error (Status & Warnings): {e}")
+            print(f"⚠️ Telegram notification error (Status & Warnings node): {e}")
 
-    # 2. Send directly to Critical Alerts, Order Information, and Admin Direct
+    if not status_sent:
+        url = f"https://api.telegram.org/bot{STATUS_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": STATUS_CHAT_ID, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True}
+        for attempt in range(1, 5):
+            try:
+                resp = requests.post(url, json=payload, timeout=12)
+                if resp.status_code == 200:
+                    print(f"[Telegram Bot Response - Status & Warnings Direct IPv4]: 200 (attempt {attempt})")
+                    status_sent = True
+                    break
+            except Exception as e:
+                print(f"⚠️ Telegram direct fallback error (Status & Warnings attempt {attempt}/4): {e}")
+            time.sleep(2 * attempt)
+
+    # 2. Send directly to Critical Alerts, Order Information, and Admin Direct (with 4-attempt IPv4 retry)
     for token, chat_id, label in TELEGRAM_GROUPS:
-        try:
-            url = f"https://api.telegram.org/bot{token}/sendMessage"
-            payload = {
-                "chat_id": chat_id,
-                "text": msg,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True
-            }
-            resp = requests.post(url, json=payload, timeout=10)
-            print(f"[Telegram Bot Response - {label} ({chat_id})]: {resp.status_code}")
-        except Exception as e:
-            print(f"⚠️ Telegram notification error ({label}): {e}")
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": msg,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }
+        for attempt in range(1, 5):
+            try:
+                resp = requests.post(url, json=payload, timeout=12)
+                print(f"[Telegram Bot Response - {label} ({chat_id})]: {resp.status_code}")
+                if resp.status_code == 200:
+                    break
+            except Exception as e:
+                print(f"⚠️ Telegram notification error ({label} attempt {attempt}/4): {e}")
+            time.sleep(2 * attempt)
 
 def _filter_valid_ticks(ticks):
     if not ticks:
@@ -362,7 +389,7 @@ def simulate_sim3_live_4stage_engine(ticks, total_qty, override_ep=None):
     """
     SIMULATION 3: LIVE 4-STAGE DYNAMIC ENGINE (CURRENT LIVE CODE)
       1. Stage 1 (Time-Decay SL, 3-Min Consecutive Breach):
-           • 09:42 – 10:59: 2.25% SL
+           • 09:42 – 10:59: 3.00% SL
            • 11:00 – 12:29: 1.50% SL
            • 12:30 – 14:45: 1.00% SL
       2. Stage 2 (Pre-TP Profit Lock at +1.25% Peak -> Locks +0.50% Profit Floor at ep * 0.9950):
@@ -420,7 +447,7 @@ def simulate_sim3_live_4stage_engine(ticks, total_qty, override_ep=None):
             # Determine Stage 1 Time-Decay SL tier
             t_int = int(tm.replace(':', '')[:4]) if len(tm) >= 4 else 942
             if t_int < 1100:
-                decay_sl_pct = 2.25
+                decay_sl_pct = 3.00
             elif t_int < 1230:
                 decay_sl_pct = 1.50
             else:
@@ -668,17 +695,20 @@ def reconcile_live_mimic(target_date=None, force_all=False, no_telegram=False, a
             total_qty = int(row['total_quantity']) if 'total_quantity' in row and not pd.isna(row['total_quantity']) else lots_to_trade * lotsize
 
             try:
-                # Check if live Kotak filled_price exists in shortsell_orders for exact entry alignment
+                # Check if live Kotak filled_price and margin-adjusted quantity exist in shortsell_orders
                 cursor.execute(f"""
-                    SELECT filled_price
+                    SELECT filled_price, quantity
                     FROM shortsell_orders
                     WHERE trade_date = '{d}' AND stockname = '{s}'
                       AND model_name LIKE '%0942%'
-                      AND filled_price IS NOT NULL AND filled_price > 0
+                      AND isvalid NOT IN ('FALSE', 'REJECTED')
                     ORDER BY id DESC LIMIT 1
                 """)
                 ord_row = cursor.fetchone()
-                live_filled_ep = float(ord_row['filled_price']) if ord_row and ord_row.get('filled_price') else None
+                live_filled_ep = float(ord_row['filled_price']) if (ord_row and ord_row.get('filled_price') and float(ord_row['filled_price']) > 0) else None
+                if ord_row and ord_row.get('quantity') and int(ord_row['quantity']) > 0:
+                    total_qty = int(ord_row['quantity'])
+                    df_ledger.loc[idx, 'total_quantity'] = total_qty
 
                 # Query scrapdata_F1 (Futures) first
                 cursor.execute(f"""
@@ -724,7 +754,7 @@ def reconcile_live_mimic(target_date=None, force_all=False, no_telegram=False, a
                 # Update Simulation 3 (Live 4-Stage Dynamic Engine) fields
                 df_ledger.loc[idx, 'entry_price'] = primary['entry_price']
                 df_ledger.loc[idx, 'entry_time'] = primary['entry_time']
-                df_ledger.loc[idx, 'stop_loss_2_25pct'] = round(primary['entry_price'] * 1.0225, 2)
+                df_ledger.loc[idx, 'stop_loss_2_25pct'] = round(primary['entry_price'] * 1.0300, 2)
                 df_ledger.loc[idx, 'tp1_price'] = round(primary['entry_price'] * 0.98, 2)
                 df_ledger.loc[idx, 'leg1_exit_price'] = primary['leg1_exit_price']
                 df_ledger.loc[idx, 'leg1_exit_time'] = primary['leg1_exit_time']
@@ -982,7 +1012,7 @@ def reconcile_live_mimic(target_date=None, force_all=False, no_telegram=False, a
             "",
             "━━━━━━━━━━━━━━━━━━━━━",
             "3️⃣ <b>SIMULATION 3: LIVE 4-STAGE DYNAMIC ENGINE (CURRENT LIVE CODE)</b>",
-            "<i>Rules: Stage 1 Time-Decay 3-Min SL (2.25% ➔ 1.50% @ 11:00 ➔ 1.00% @ 12:30) | Stage 2 Pre-TP Lock (+1.25% Peak ➔ Locks +0.50%) | Stage 3 Trail TP (2.00% Act ➔ 1.75% Floor & 0.50% Trail) | Stage 4 Re-Entry (+0.50% Bounce)</i>"
+            "<i>Rules: Stage 1 Time-Decay 3-Min SL (3.00% ➔ 1.50% @ 11:00 ➔ 1.00% @ 12:30) | Stage 2 Pre-TP Lock (+1.25% Peak ➔ Locks +0.50%) | Stage 3 Trail TP (2.00% Act ➔ 1.75% Floor & 0.50% Trail) | Stage 4 Re-Entry (+0.50% Bounce)</i>"
         ])
         for i, (_, r) in enumerate(day_df.iterrows()):
             stk_name = str(r['clean_stock']) if 'clean_stock' in r and pd.notna(r['clean_stock']) else str(r['stockname'])

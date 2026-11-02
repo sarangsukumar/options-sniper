@@ -42,6 +42,7 @@ LOT_SIZE_FILE = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/config/hi
 PRED_CSV = os.path.join(SCRIPT_DIR, 'live_predictions_today.csv')
 LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0940_live_ledger.csv')
 AUDIT_CSV = os.path.join(BASE_DIR, 'audited_0940_hybrid_trades.csv')
+LOCAL_AUDIT_CSV = os.path.join(SCRIPT_DIR, 'audited_0940_hybrid_trades.csv')
 SARANG_DIR = BASE_DIR
 CAPITAL_PER_TRADE = 750000.0  # ₹7.5 Lakhs per trade allocation
 
@@ -209,11 +210,14 @@ def compute_features(df_prev_ticks, df_0907, df_morn_ticks, target_date_str, cl_
                 gap_fade = 0.0
             morn_range = ((p_high - p_low) / p_open * 100.0) if p_open > 0 else 0.0
             rejection = ((p_high - p_940) / p_open * 100.0) if p_open > 0 else 0.0
+            actual_stock_pct_940 = ((p_940 - p_prev_close) / p_prev_close * 100.0) if p_prev_close > 0 else 0.0
 
             records.append({
                 'date_str': target_date_str,
                 'clean_stock': stock,
+                'prev_close': p_prev_close,
                 'entry_price_0940': p_940,
+                'actual_stock_pct_940': actual_stock_pct_940,
                 'gap_0907_pct': gap_0907_pct,
                 'gap_fade_0907_to_940_pct': gap_fade,
                 'prev_intraday_vwap_gap': pm.get('prev_intraday_vwap_gap', 0.0),
@@ -327,6 +331,24 @@ def retrain_and_save_model():
     df_hist['short_entry_price'] = pd.to_numeric(df_hist['short_entry_price'], errors='coerce').fillna(0.0)
     df_hist = df_hist[df_hist['short_entry_price'] >= 30.0].copy()
 
+    # Purge any F1 contamination from historical pre-market features using pure EQ (price_0907_eq)
+    if 'price_0907_eq' in df_hist.columns and 'prev_close' in df_hist.columns:
+        df_hist['price_0907_eq'] = pd.to_numeric(df_hist['price_0907_eq'], errors='coerce')
+        df_hist['prev_close'] = pd.to_numeric(df_hist['prev_close'], errors='coerce')
+        df_hist['morning_close'] = pd.to_numeric(df_hist.get('morning_close', df_hist.get('short_entry_price')), errors='coerce')
+        df_hist['Gap_Pct'] = pd.to_numeric(df_hist.get('Gap_Pct', 0), errors='coerce').fillna(0.0)
+
+        df_hist['gap_0907_pct'] = np.where(
+            df_hist['price_0907_eq'].notna() & df_hist['prev_close'].notna() & (df_hist['prev_close'] > 0),
+            ((df_hist['price_0907_eq'] - df_hist['prev_close']) / df_hist['prev_close']) * 100.0,
+            df_hist['Gap_Pct']
+        )
+        df_hist['gap_fade_0907_to_940_pct'] = np.where(
+            df_hist['price_0907_eq'].notna() & (df_hist['price_0907_eq'] > 0) & df_hist['morning_close'].notna(),
+            ((df_hist['morning_close'] - df_hist['price_0907_eq']) / df_hist['price_0907_eq']) * 100.0,
+            0.0
+        )
+
     # Engineer Rebound Propensity Features & Bear Momentum Acceleration
     df_hist['gap_0907_pct'] = pd.to_numeric(df_hist['gap_0907_pct'], errors='coerce').fillna(0.0)
     df_hist['gap_fade_0907_to_940_pct'] = pd.to_numeric(df_hist['gap_fade_0907_to_940_pct'], errors='coerce').fillna(0.0)
@@ -344,9 +366,11 @@ def retrain_and_save_model():
 
     df_hist['short_target'] = pd.to_numeric(df_hist.get('short_pct_return', 0.0), errors='coerce').fillna(0.0)
 
-    # Train on all available historical data up to today
+    # Half-Yearly Expanding Window Cutoff (Jan 1 for H1, Jul 1 for H2)
     today_date = pd.Timestamp.today().normalize()
-    tr = df_hist[df_hist['date_dt'] < today_date].copy()
+    cutoff_month = 7 if today_date.month >= 7 else 1
+    cutoff_date = pd.Timestamp(year=today_date.year, month=cutoff_month, day=1)
+    tr = df_hist[df_hist['date_dt'] < cutoff_date].copy()
 
     params = dict(
         objective='regression',
@@ -362,7 +386,7 @@ def retrain_and_save_model():
 
     mod.booster_.save_model(MODEL_FILE)
     print(f"   ✅ Audited Rebound-Aware Model saved → {MODEL_FILE}")
-    print(f"      (Trained on {len(tr):,} historical rows | {len(PURE_DB_FEATURES)} features)")
+    print(f"      (Half-Yearly Cutoff < {cutoff_date.strftime('%Y-%m-%d')} | Trained on {len(tr):,} historical rows | {len(PURE_DB_FEATURES)} features)")
     return mod.booster_
 
 def train_and_predict_single(df_today):
@@ -459,16 +483,17 @@ def train_and_predict_single(df_today):
         print(f"   ⚠️ Could not fetch Nifty live data: {e}. Filters defaulting to Rule 1 only.")
         nifty_pct = 0.0
 
-    # Compute stock % change from prev_close to 09:40
-    # prev_close is stored in prev_metrics; entry_price_0940 is the 09:40 price
-    if 'entry_price_0940' in df_ranked.columns and 'Gap_Pct' in df_ranked.columns:
-        # Gap_Pct = (open - prev_close) / prev_close * 100, but we need 09:40 price
-        # Use gap_0907_pct + gap_fade_0907_to_940_pct to reconstruct 09:40 % from prev_close
-        # Actually simpler: stock_pct = gap_0907_pct + gap_fade_0907_to_940_pct (both relative)
-        # But most accurate: we stored entry_price_0940 and Gap_Pct is based on open, not prev_close
-        # Reconstruct: stock_pct = (p_940 / p_prev_close - 1) * 100
-        # = gap_0907_pct + gap_fade_0907_to_940_pct (approximately)
-        df_ranked['stock_pct_940'] = df_ranked['gap_0907_pct'] + df_ranked['gap_fade_0907_to_940_pct']
+    # Compute exact stock % change from prev_close to 09:40
+    if 'actual_stock_pct_940' in df_ranked.columns:
+        df_ranked['stock_pct_940'] = pd.to_numeric(df_ranked['actual_stock_pct_940'], errors='coerce').fillna(0.0)
+    elif 'entry_price_0940' in df_ranked.columns and 'prev_close' in df_ranked.columns:
+        df_ranked['stock_pct_940'] = np.where(
+            df_ranked['prev_close'] > 0,
+            ((df_ranked['entry_price_0940'] - df_ranked['prev_close']) / df_ranked['prev_close']) * 100.0,
+            0.0
+        )
+    elif 'entry_price_0940' in df_ranked.columns and 'Gap_Pct' in df_ranked.columns:
+        df_ranked['stock_pct_940'] = ((1.0 + df_ranked['gap_0907_pct']/100.0) * (1.0 + df_ranked['gap_fade_0907_to_940_pct']/100.0) - 1.0) * 100.0
     else:
         df_ranked['stock_pct_940'] = 0.0
 
@@ -598,7 +623,7 @@ def train_and_predict_single(df_today):
 
 
 def append_to_daily_ledger(target_date_str, df_plan):
-    for f_path in [LEDGER_CSV, AUDIT_CSV]:
+    for f_path in [LEDGER_CSV, AUDIT_CSV, LOCAL_AUDIT_CSV]:
         try:
             if not os.path.exists(f_path):
                 df_plan.to_csv(f_path, index=False)
@@ -623,8 +648,8 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
     n_blocked = len(blocked_stocks) if blocked_stocks else 0
     lines = [
         f"📉 <b>HYBRID SHORT SELL ORDERS ({target_date_str} - {day_name})</b>",
-        f"⏰ <b>Entry:</b> 09:42:00 AM IST | <b>Exit:</b> 14:45:00 PM IST",
-        f"🛡️ <b>Stop Loss:</b> 2.25% (Tick-by-Tick) | <b>Budget:</b> Fixed ₹7.5L per Trade",
+        f"⏰ <b>Entry:</b> 09:42:00 AM IST | <b>Exit:</b> 4-Stage Dynamic Engine (14:45 PM)",
+        f"🛡️ <b>Stop Loss:</b> 3.00% ➔ 1.50% ➔ 1.00% (3-Min Time-Decay) | <b>Budget:</b> Fixed ₹7.5L/Trade",
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
@@ -639,12 +664,12 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
     for idx, row in df_plan.iterrows():
         stock = row['clean_stock']
         entry = float(row['entry_price_0940'])
-        sl    = entry * 1.0225
+        sl    = entry * 1.0300
         qty   = int(row.get('total_quantity', int(CAPITAL_PER_TRADE / entry)))
         sig   = row.get('signal_type', 'TOP 4')
         lines.append(f"✅ <b>{stock}</b>  <i>({sig})</i>")
         lines.append(f"  • <b>Action:</b> SHORT SELL {qty} QTY (₹7.5L Notional)")
-        lines.append(f"  • <b>Entry:</b> ₹{entry:,.2f}  |  <b>SL:</b> ₹{sl:,.2f}")
+        lines.append(f"  • <b>Entry:</b> ₹{entry:,.2f}  |  <b>Initial SL (3.0%):</b> ₹{sl:,.2f}")
         lines.append(f"------------------------------------")
 
     # Skipped stocks — same card style, just marked ⛔
@@ -652,7 +677,7 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
         for b in blocked_stocks:
             entry = b.get('entry', 0)
             qty   = b.get('qty', 0)
-            sl    = entry * 1.0225 if entry else 0
+            sl    = entry * 1.0300 if entry else 0
             lines.append(f"⛔ <b>{b['stock']}</b>  <i>(SKIPPED)</i>")
             lines.append(f"  • <b>Would have been:</b> SHORT SELL {qty} QTY (₹7.5L Notional)")
             lines.append(f"  • <b>Price:</b> ₹{entry:,.2f}  |  <b>SL:</b> ₹{sl:,.2f}")
@@ -731,7 +756,7 @@ def main():
     print("="*83)
 
     df_plan['total_quantity'] = df_plan.apply(lambda x: int(CAPITAL_PER_TRADE / x['entry_price_0940']), axis=1)
-    df_plan['stop_loss_2_25pct'] = df_plan['entry_price_0940'] * 1.0225
+    df_plan['stop_loss_2_25pct'] = df_plan['entry_price_0940'] * 1.0300
 
     print(df_plan[['clean_stock', 'signal_type', 'lots_to_trade', 'total_quantity', 'entry_price_0940', 'stop_loss_2_25pct']])
 

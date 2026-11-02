@@ -72,7 +72,35 @@ SYMBOL_ALIASES = {
     'LTF': 'LTF',
     'LTIMINDTREE': 'LTM',
     'LTIM': 'LTM',
+    'MCDOWELL-N': 'UNITDSPR',
+    'UNITDSPR': 'UNITDSPR',
+    'M&MFIN': 'MMFIN',
+    'MMFIN': 'MMFIN',
 }
+
+REVERSE_SYMBOL_ALIASES = {
+    'TMPV': ['TATAMOTORS', 'TMPV'],
+    'SAMMAANCAP': ['IBULHSGFIN', 'SAMMAANCAP'],
+    'GMRP&UI': ['GMRINFRA', 'GMRP&UI'],
+    'GMRINFRA': ['GMRINFRA', 'GMRP&UI'],
+    'LTF': ['L&TFH', 'LTF'],
+    'LTM': ['LTIMINDTREE', 'LTIM', 'LTM'],
+    'UNITDSPR': ['MCDOWELL-N', 'UNITDSPR'],
+    'MMFIN': ['M&MFIN', 'MMFIN'],
+}
+
+def resolve_stock_aliases(sym, active_keys=None):
+    """Normalizes a Kotak symbol and resolves to matching canonical stockname in active_keys if present."""
+    clean = str(sym or '').replace('-EQ', '').replace('_EQ', '').strip().upper()
+    if 'GMRP' in clean or 'GMRINFRA' in clean:
+        clean = 'GMRINFRA'
+    if active_keys:
+        if clean in active_keys:
+            return clean
+        for cand in REVERSE_SYMBOL_ALIASES.get(clean, []):
+            if cand in active_keys:
+                return cand
+    return clean
 
 _MASTER_TOKEN_CACHE = None
 _STOCK_TICK_CACHE = {}
@@ -154,10 +182,13 @@ def get_open_buy_orders(client):
                     if status in ('open', 'pending', 'trigger pending', 'put order req received'):
                         sym = o.get('trdSym', '') or o.get('sym', '')
                         clean_sym = sym.replace('-EQ', '').replace('_EQ', '').strip().upper()
-                        open_orders[clean_sym] = {
+                        ord_entry = {
                             'order_id': str(o.get('nOrdNo') or o.get('orderId')),
                             'price': float(o.get('prc') or o.get('price') or 0.0)
                         }
+                        open_orders[clean_sym] = ord_entry
+                        for alias_k in REVERSE_SYMBOL_ALIASES.get(clean_sym, []):
+                            open_orders[alias_k] = ord_entry
     except Exception as e:
         print(f"⚠️ Order book fetch failed: {e}")
     return open_orders
@@ -399,7 +430,7 @@ def get_0940_active_sl_pct(current_time_int):
     """
     Returns (sl_pct, tier_name, tier_desc) for the 09:40 model based on time of day.
     Stage 1 Dynamic Time-Decaying SL:
-      - 09:42 to 11:00: 2.25% (Morning Volatility Window)
+      - 09:42 to 11:00: 3.00% (Morning Volatility Window)
       - 11:00 to 12:30: 1.50% (Midday Consolidation Window)
       - 12:30 to 14:45: 1.00% (Afternoon Trending / Defense Window)
     """
@@ -408,7 +439,7 @@ def get_0940_active_sl_pct(current_time_int):
     elif current_time_int >= 1100:
         return 1.50, "1.50% MIDDAY TIGHTENED SL", "Midday consolidation tier (Max loss capped at 1.50%)"
     else:
-        return 2.25, "2.25% MORNING INITIAL SL", "Morning volatility tolerance tier (Max loss capped at 2.25%)"
+        return 3.00, "3.00% MORNING INITIAL SL", "Morning volatility tolerance tier (Max loss capped at 3.00%)"
 
 def send_telegram_alert(msg, chat_id=TELEGRAM_CRITICAL_CHAT_ID):
     try:
@@ -540,7 +571,7 @@ def generate_pnl_report_image(hourly_items, total_open_pnl, total_realized_pnl, 
             if '0920' in model_name:
                 rule_text = 'Rule: 0.8% TP | 2.0% SL'
             else:
-                rule_text = 'Rule: L1 TP 2.0% / SL 2.25% | Re-Entry TP 1.75% / SL Zero Risk'
+                rule_text = 'Rule: 4-Stage (SL 3.0%->1.5%->1.0% | Lock +0.5% @ +1.25% | Trail TP @ +2.0%)'
             draw.text((560, y + 13), rule_text, font=font_rule, fill=(148, 163, 184))
             y += 48
 
@@ -655,7 +686,7 @@ def generate_sl_warning_image(alert_items, timestamp_str, output_path='/tmp/sl_w
         # Header Banner
         draw.rectangle([(0, 0), (width, header_h)], fill=(153, 27, 27)) # Crimson Red
         draw.text((30, 20), '⚠️ STOP-LOSS PROXIMITY WARNING ALERT', font=font_title, fill=(255, 255, 255))
-        draw.text((30, 62), f'📅 {timestamp_str}  |  ⚡ Crossed 2.0% Loss Threshold (2.25% SL Auto Cover)', font=font_subtitle, fill=(254, 202, 202))
+        draw.text((30, 62), f'📅 {timestamp_str}  |  ⚡ Approaching Active Time-Decay SL (3-Min Auto Cover)', font=font_subtitle, fill=(254, 202, 202))
 
         y = header_h + 20
 
@@ -665,11 +696,12 @@ def generate_sl_warning_image(alert_items, timestamp_str, output_path='/tmp/sl_w
             qty = a['qty']
             ep = a['entry']
             ltp = a['ltp']
-            sl_225 = round(ep * 1.0225, 2)
-            dist_to_sl = round(sl_225 - ltp, 2)
+            sl_lvl = float(a.get('sl') or round(ep * 1.0300, 2))
+            sl_pct_lbl = a.get('sl_pct', 3.00)
+            dist_to_sl = round(sl_lvl - ltp, 2)
             loss_pct = a['loss_pct']
             spnl = a['stock_pnl']
-            breaches = a.get('consecutive_breaches', 1)
+            breaches = a.get('consecutive_breaches', 0)
 
             draw.rectangle([(30, y), (width - 30, y + card_h)], fill=(30, 41, 59), outline=(239, 68, 68), width=3)
             
@@ -689,8 +721,8 @@ def generate_sl_warning_image(alert_items, timestamp_str, output_path='/tmp/sl_w
             draw.text((380, y + 105), '• Current Loss (₹):', font=font_label, fill=(203, 213, 225))
             draw.text((560, y + 105), f'₹{spnl:+.2f}', font=font_val_red, fill=(239, 68, 68))
 
-            draw.text((50, y + 145), '• 2.25% SL Level:', font=font_label, fill=(203, 213, 225))
-            draw.text((220, y + 145), f'₹{sl_225:.2f}', font=font_val, fill=(251, 146, 60))
+            draw.text((50, y + 145), f'• {sl_pct_lbl}% SL Level:', font=font_label, fill=(203, 213, 225))
+            draw.text((220, y + 145), f'₹{sl_lvl:.2f}', font=font_val, fill=(251, 146, 60))
 
             draw.text((380, y + 145), '• Distance to SL Exit:', font=font_label, fill=(203, 213, 225))
             dist_str = f'₹{dist_to_sl:.2f} away' if dist_to_sl > 0 else 'BREACHED'
@@ -816,8 +848,7 @@ def main():
     for p in pos_list:
         if p.get('prod') != 'MIS':
             continue
-        sym = (p.get('trdSym', '') or p.get('sym', '')).replace('-EQ', '').replace('_EQ', '').strip().upper()
-        if "GMRP" in sym or "GMRINFRA" in sym: sym = "GMRINFRA"
+        sym = resolve_stock_aliases(p.get('trdSym', '') or p.get('sym', ''), active_keys=stock_map)
         fl_sell, cf_sell = int(p.get('flSellQty', 0) or 0), int(p.get('cfSellQty', 0) or 0)
         fl_buy, cf_buy   = int(p.get('flBuyQty', 0) or 0), int(p.get('cfBuyQty', 0) or 0)
         sell_qty = fl_sell + cf_sell
@@ -841,7 +872,8 @@ def main():
         }
 
     # Enhance broker_positions with FIFO order book reconstruction
-    for sym, lot in lots_summary.items():
+    for raw_lot_sym, lot in lots_summary.items():
+        sym = resolve_stock_aliases(raw_lot_sym, active_keys=stock_map)
         if sym in broker_positions:
             bp = broker_positions[sym]
             bp['cur_open_qty'] = lot['cur_open_qty']
@@ -892,6 +924,29 @@ def main():
     hourly_items = []
     total_open_pnl = 0.0
     open_count = 0
+
+    # Pre-compute 09:20 Basket State (Realized + Unrealized PnL & Leg 1 TP1 Fills) for Dynamic Basket SL
+    ltp_cache_0920 = {}
+    basket_pnl_0920 = {}
+    basket_tp1_0920 = {}
+    if is_0920_window:
+        for stk_b, info_b in stock_map.items():
+            if not info_b.get('is_0920') or stk_b not in broker_positions:
+                continue
+            bp_b = broker_positions[stk_b]
+            realized_b = float(bp_b.get('total_realized', bp_b.get('realized_pnl', 0.0)) or 0.0)
+            closed_qty_b = int(bp_b.get('total_closed_qty', 0) or 0)
+            is_closed_b = bp_b.get('is_closed', False) or (bp_b.get('qty', 0) <= 0)
+            unrealized_b = 0.0
+            if not is_closed_b:
+                ltp_b = fetch_live_ltp(client, stk_b)
+                if ltp_b > 0:
+                    ltp_cache_0920[stk_b] = ltp_b
+                    ep_b = bp_b['avg_entry'] if bp_b.get('avg_entry', 0) > 0 else info_b['entry_price']
+                    if ep_b > 0:
+                        unrealized_b = (ep_b - ltp_b) * bp_b['qty']
+            basket_pnl_0920[stk_b] = realized_b + unrealized_b
+            basket_tp1_0920[stk_b] = (closed_qty_b > 0 and realized_b > 0.0)
 
     print(f"[{datetime.now(ist).strftime('%H:%M:%S')}] Monitoring {len(stock_map)} matched stocks across Kotak shorts...")
 
@@ -1092,7 +1147,7 @@ def main():
             # Don't do active SL/TP checks for closed positions
             continue
 
-        ltp = fetch_live_ltp(client, stk)
+        ltp = ltp_cache_0920.get(stk) or fetch_live_ltp(client, stk)
         if ltp <= 0:
             continue
 
@@ -1116,28 +1171,43 @@ def main():
 
         # ==========================================
         # LOGIC FOR 09:20 MODEL (09:25 to 09:40)
-        # ==========================================
-        # ==========================================
-        # LOGIC FOR 09:20 MODEL (09:25 to 09:40)
-        # 50/50 Split Strategy: Base Stop Loss (₹3,000 / 0.60%)
-        # Take Profit is handled by passive resting book order (Leg 1, ₹2,000 TP)
-        # and 09:36-09:39 30s cadence check (Leg 2, ₹500+ TP).
+        # 50/50 Split Strategy + Dynamic Basket SL:
+        #   - Base Stop Loss: ₹6,250 / 1.25% adverse move
+        #   - Cond A (>=2 stocks hit Leg 1 TP & OtherPnL >= +₹3,000): tighten to ₹3,500 / 0.70%
+        #   - Cond B (Time >= 09:34 & OtherPnL >= +₹3,500): tighten to ₹3,000 / 0.60%
         # ==========================================
         if info['is_0920'] and is_0920_window:
-            # Base Stop Loss: ₹3,000 risk or 0.60% adverse move
-            hit_sl = (loss_pct >= 0.60 or stock_pnl <= -3000.0 or loss_pct >= 2.0)
-            
+            tot_basket_0920 = sum(basket_pnl_0920.values())
+            this_tot_pnl_0920 = basket_pnl_0920.get(stk, stock_pnl)
+            other_pnl_0920 = tot_basket_0920 - this_tot_pnl_0920
+            tp1_hit_cnt_0920 = sum(1 for v in basket_tp1_0920.values() if v)
+
+            active_sl_pct = 1.25
+            active_sl_rs = 6250.0
+            action_type = "BASE STOP LOSS (₹6,250 / 1.25%)"
+
+            if tp1_hit_cnt_0920 >= 2 and other_pnl_0920 >= 3000.0:
+                active_sl_pct = 0.70
+                active_sl_rs = 3500.0
+                action_type = f"DYNAMIC BASKET SL-A (₹3,500 / 0.70% | {tp1_hit_cnt_0920} TP1s, OtherPnL +₹{other_pnl_0920:,.0f})"
+
+            if current_time_int >= 934 and other_pnl_0920 >= 3500.0:
+                active_sl_pct = 0.60
+                active_sl_rs = 3000.0
+                action_type = f"DYNAMIC BASKET SL-B >=09:34 (₹3,000 / 0.60% | OtherPnL +₹{other_pnl_0920:,.0f})"
+
+            hit_sl = (loss_pct >= active_sl_pct or this_tot_pnl_0920 <= -active_sl_rs or loss_pct >= 2.0)
+
             if hit_sl:
                 limit_cover_price = round_to_tick(ltp + 0.10)
-                action_type = "BASE STOP LOSS (₹3,000 / 0.60%)"
-                    
+
                 existing_open = open_buy_orders.get(stk)
                 open_price = existing_open['price'] if isinstance(existing_open, dict) else 0.0
                 if existing_open and abs(open_price - limit_cover_price) < 0.01:
                     print(f"⏳ [{stk}] 09:20 {action_type} limit buy order already resting at ₹{limit_cover_price:.2f}. Awaiting fill.")
                 else:
-                    execute_limit_squareoff_order(client, stk, qty, limit_cover_price, model, loss_pct, open_buy_orders, action_type, stock_pnl=stock_pnl)
-                    
+                    execute_limit_squareoff_order(client, stk, qty, limit_cover_price, model, loss_pct, open_buy_orders, action_type, stock_pnl=this_tot_pnl_0920)
+
             alert_state[stk] = stk_state
 
         # ==========================================
@@ -1457,6 +1527,7 @@ def main():
                             'stock': stk, 'model': model, 'qty': qty,
                             'ltp': ltp, 'entry': ep, 'sl': base_sl, 'sl_pct': decay_sl_pct,
                             'loss_pct': loss_pct,
+                            'consecutive_breaches': stk_state.get('consecutive_breaches', 0),
                             'stock_pnl': stock_pnl, 'total_open_pnl': total_open_pnl
                         })
                         stk_state['last_alert_type'] = 'SL_BREACH'
@@ -1513,8 +1584,8 @@ def main():
         for a in alerts_to_send_0940:
             spnl = a['stock_pnl']
             spnl_s = "+" if spnl >= 0 else "-"
-            sl_lvl = a.get('sl') or round_to_tick(a['entry'] * 1.0225)
-            sl_pct_lbl = a.get('sl_pct', 2.25)
+            sl_lvl = a.get('sl') or round_to_tick(a['entry'] * 1.0300)
+            sl_pct_lbl = a.get('sl_pct', 3.00)
             dist_to_sl = round(sl_lvl - a['ltp'], 2)
             dist_str = f"₹{dist_to_sl:.2f} away" if dist_to_sl > 0 else "BREACHED"
             msg += f"\n🚨 <b>STOCK: {a['stock']}</b> ({a['model']})\n"

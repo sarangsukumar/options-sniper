@@ -13,8 +13,16 @@ echo "==========================================================================
 echo "🕒 Starting 09:40 Hybrid Evening Reconciler at $(date)"
 echo "=============================================================================="
 
-/usr/bin/python3 "$DIR/reconcile_0940_hybrid_pnl.py" --no-telegram "$@"
-/usr/bin/python3 "$DIR/reconcile_0940_live_mimic_pnl.py" "$@"
+TODAY_IST=$(TZ=Asia/Kolkata date '+%Y-%m-%d')
+
+if [ $# -eq 0 ]; then
+    ARGS=(--date "$TODAY_IST" --force-all)
+else
+    ARGS=("$@")
+fi
+
+/usr/bin/python3 "$DIR/reconcile_0940_hybrid_pnl.py" --no-telegram "${ARGS[@]}"
+/usr/bin/python3 "$DIR/reconcile_0940_live_mimic_pnl.py" "${ARGS[@]}"
 
 EXIT_CODE=$?
 echo "=============================================================================="

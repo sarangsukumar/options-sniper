@@ -75,19 +75,6 @@ def get_kotak_client():
     except Exception as e:
         print(f"Login error: {e}")
         return None
-        auth = auth.iloc[0]
-        
-        with HiddenPrints():
-            client = NeoAPI(consumer_key=auth['consumer_key'], environment='prod', neo_fin_key='neotradeapi')
-            totp_code = pyotp.TOTP(str(auth.get('totp_secret', '')).strip()).now()
-            mobile = str(auth.get('mobile_number', '')).strip()
-            formatted_mobile = mobile if mobile.startswith('+') else f'+91{mobile}'
-            client.totp_login(mobile_number=formatted_mobile, ucc=user_id, totp=totp_code)
-            client.totp_validate(mpin=str(int(auth['MPIN'])))
-        return client
-    except Exception as e:
-        print(f"Login error: {e}")
-        return None
 
 def get_taxes(qty, sell_price, buy_price):
     """Approximate Kotak MIS charges — same formula used in backtests."""
@@ -173,8 +160,9 @@ def run():
 
             if broker_id and broker_id in kotak_order_map:
                 ko = kotak_order_map[broker_id]
-                ord_status = ko.get('ordSt', '').lower()
+                ord_status = str(ko.get('ordSt', '')).lower().strip()
                 avg_prc    = ko.get('avgPrc') or ko.get('avgprc') or ko.get('flPrc') or 0
+                fld_qty    = int(ko.get('fldQty') or ko.get('fldqty') or 0)
                 try:
                     avg_prc = float(avg_prc)
                 except:
@@ -183,16 +171,42 @@ def run():
                 if ord_status == 'complete' and avg_prc > 0:
                     fill_status  = 'SELL_FILLED'
                     filled_price = round(avg_prc, 2)
+                    if fld_qty > 0:
+                        quantity = fld_qty
                     fill_time    = datetime.now()
-                    notes        = f"Filled @ ₹{filled_price}"
-                    log(f"    ✅ FILLED @ ₹{filled_price}")
+                    notes        = f"Filled @ ₹{filled_price} (Qty: {quantity})"
+                    log(f"    ✅ FILLED @ ₹{filled_price} (Qty: {quantity})")
+                elif fld_qty > 0 and avg_prc > 0:
+                    # Partial fill: cancel remaining open quantity on Kotak and record filled portion
+                    if ord_status in ('open', 'pending', 'trigger pending', 'put order req received') and client:
+                        try:
+                            client.cancel_order(order_id=broker_id)
+                            log(f"    🔄 Cancelled remaining unfilled portion of partially filled order {broker_id} ({fld_qty}/{quantity} filled)")
+                        except Exception as ce:
+                            log(f"    ⚠️ Cancel remainder failed for {broker_id}: {ce}")
+                    fill_status  = 'SELL_FILLED'
+                    filled_price = round(avg_prc, 2)
+                    quantity     = fld_qty
+                    fill_time    = datetime.now()
+                    notes        = f"Partial Fill @ ₹{filled_price} (Qty: {quantity}); remainder cancelled"
+                    log(f"    ✅ PARTIAL FILL CONFIRMED @ ₹{filled_price} (Qty: {quantity})")
                 elif ord_status in ('rejected', 'cancelled', 'canceled'):
                     fill_status = 'REJECTED'
                     notes       = f"Kotak status: {ord_status}"
                     log(f"    ❌ REJECTED by Kotak")
                 else:
+                    # Unfilled order still resting in order book at confirmation time -> cancel it so it cannot fill hours later
+                    if ord_status in ('open', 'pending', 'trigger pending', 'put order req received', 'after market order req received') and client:
+                        try:
+                            client.cancel_order(order_id=broker_id)
+                            log(f"    🔄 Cancelled unfilled open SELL order {broker_id} for {stockname}")
+                            notes = f"Kotak status: {ord_status} (unfilled -> cancelled at confirmation)"
+                        except Exception as ce:
+                            log(f"    ⚠️ Failed to cancel unfilled order {broker_id}: {ce}")
+                            notes = f"Kotak status: {ord_status} (pending/unfilled)"
+                    else:
+                        notes = f"Kotak status: {ord_status} (pending/unfilled)"
                     fill_status = 'UNFILLED'
-                    notes       = f"Kotak status: {ord_status} (pending/partial)"
                     log(f"    ⚠️  UNFILLED — status={ord_status}")
             elif not broker_id:
                 fill_status = 'UNFILLED'
@@ -205,13 +219,13 @@ def run():
                 log(f"    ⚠️  broker_id not in Kotak order book")
 
             with db.cursor() as c:
-                # Update shortsell_orders.filled_price if filled
+                # Update shortsell_orders.filled_price and quantity if filled
                 if fill_status == 'SELL_FILLED':
                     c.execute("""
                         UPDATE shortsell_orders
-                        SET filled_price = %s, isvalid = '2', modtime = NOW()
+                        SET filled_price = %s, quantity = %s, isvalid = '2', modtime = NOW()
                         WHERE id = %s
-                    """, (filled_price, so_id))
+                    """, (filled_price, quantity, so_id))
 
                 # Upsert into scalp_trade_log
                 c.execute("""
@@ -223,11 +237,11 @@ def run():
                 if existing:
                     c.execute("""
                         UPDATE scalp_trade_log
-                        SET sell_price = %s, sell_time = %s,
+                        SET quantity = %s, sell_price = %s, sell_time = %s,
                             broker_sell_order_id = %s, status = %s, notes = %s,
                             modtime = NOW()
                         WHERE id = %s
-                    """, (filled_price, fill_time, broker_id, fill_status, notes, existing['id']))
+                    """, (quantity, filled_price, fill_time, broker_id, fill_status, notes, existing['id']))
                 else:
                     c.execute("""
                         INSERT INTO scalp_trade_log

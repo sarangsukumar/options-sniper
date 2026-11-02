@@ -256,6 +256,126 @@ def fetch_live_ltp(client, stockname):
         log_print(f"  ⚠️  Quotes API failed for {stockname}: {e}")
     return None
 
+
+def adjust_qty_for_kotak_margin(client, stockname, price, db_qty, db_price, model_name, db_id=None, today=None):
+    """
+    Queries Kotak Neo client.margin_required() before placing an MIS SELL order.
+    - 0920_SCALP: ₹5.00L notional @ 5x -> max actual cash margin = ₹1,00,000 per stock.
+    - 0942_HYBRID: ₹7.50L notional (4 stocks) @ 5x -> max actual cash margin = ₹1,50,000 per stock
+                   (or ₹10.00L notional for 1-3 stocks @ 5x -> ₹2,00,000 per stock).
+    If a stock has lower leverage in Kotak (e.g., 3x / 33.33% margin like UBL instead of 5x / 20%),
+    caps quantity so actual cash margin required (ordMrgn) stays within max_actual_margin.
+    Normal 5x leverage stocks are 100% untouched. Wrapped in full try/except fallback.
+    """
+    try:
+        if not db_qty or int(db_qty) <= 0 or not price or float(price) <= 0:
+            return int(db_qty)
+        db_qty = int(db_qty)
+        price_f = float(price)
+        ref_price = float(db_price) if (db_price and float(db_price) > 0) else price_f
+        planned_notional = db_qty * ref_price
+
+        if model_name == '0920_SCALP':
+            max_actual_margin = 100000.0  # ₹1.00 Lakh actual margin req (₹5L notional @ 5x)
+        elif model_name == '0942_HYBRID':
+            # ₹1.50 Lakh actual margin for 4 stocks (₹7.5L notional), or ₹2.00 Lakh for 1-3 stocks (₹10L notional)
+            max_actual_margin = 200000.0 if planned_notional > 850000.0 else 150000.0
+        else:
+            max_actual_margin = max(100000.0, round(planned_notional / 5.0, 2))
+
+        token = find_eq_numeric_token(stockname)
+        if not token:
+            log_print(f"  ⚠️  [MARGIN CHECK] No numeric token for {stockname} — keeping Qty={db_qty}")
+            return db_qty
+
+        with suppress_stdout():
+            m_resp = client.margin_required(
+                exchange_segment='nse_cm',
+                price=str(round_to_tick(price_f)),
+                order_type='L',
+                product='MIS',
+                quantity=str(db_qty),
+                instrument_token=str(token),
+                transaction_type='S'
+            )
+
+        if not isinstance(m_resp, dict):
+            log_print(f"  ⚠️  [MARGIN CHECK] Unexpected margin_required response for {stockname}: {m_resp} — keeping Qty={db_qty}")
+            return db_qty
+
+        data = m_resp.get('data') if isinstance(m_resp.get('data'), dict) else m_resp
+        stat_val = str(data.get('stat') or m_resp.get('stat') or '').strip().lower()
+        if stat_val != 'ok' or ('ordMrgn' not in data and 'reqdMrgn' not in data):
+            log_print(f"  ⚠️  [MARGIN CHECK] Unexpected margin_required response for {stockname}: {m_resp} — keeping Qty={db_qty}")
+            return db_qty
+
+        ord_mrgn = float(data.get('ordMrgn') or data.get('reqdMrgn') or 0.0)
+        if ord_mrgn <= 0:
+            return db_qty
+
+        order_notional = price_f * db_qty
+        margin_pct = (ord_mrgn / order_notional) * 100.0 if order_notional > 0 else 20.0
+        eff_leverage = (100.0 / margin_pct) if margin_pct > 0 else 5.0
+        margin_per_share = ord_mrgn / float(db_qty)
+
+        # Only cap quantity if Kotak requires >2% above target actual cash margin AND leverage is below ~4.9x (margin_pct > 20.5%)
+        if ord_mrgn > (max_actual_margin * 1.02) and margin_pct > 20.5 and margin_per_share > 0:
+            new_qty = max(1, int(max_actual_margin // margin_per_share))
+            if new_qty < db_qty:
+                new_margin = new_qty * margin_per_share
+                log_print(
+                    f"  🛡️  [KOTAK MARGIN CAP] {stockname}: Kotak Margin={margin_pct:.2f}% ({eff_leverage:.2f}x leverage, ₹{margin_per_share:.2f}/sh) | "
+                    f"Uncapped Margin=₹{ord_mrgn:,.0f} > Cap=₹{max_actual_margin:,.0f} → "
+                    f"Adjusting Qty: {db_qty} → {new_qty} (Actual Margin: ₹{new_margin:,.0f})"
+                )
+                # Sync updated quantity to shortsell_orders in MySQL so confirm_*_fills.py & trade logs match
+                if db_id:
+                    try:
+                        conn = get_db_connection()
+                        with conn.cursor() as c:
+                            c.execute(
+                                "UPDATE shortsell_orders SET quantity=%s, modtime=NOW() WHERE id=%s",
+                                (new_qty, db_id)
+                            )
+                        conn.commit()
+                        conn.close()
+                        log_print(f"    DB quantity synced: id={db_id} ({stockname}) → quantity={new_qty}")
+                    except Exception as dbe:
+                        log_print(f"    ⚠️ DB quantity sync warning for {stockname}: {dbe}")
+
+                # Also sync daily_0940_live_ledger.csv and audited_0940_hybrid_trades.csv if 0942_HYBRID
+                if model_name == '0942_HYBRID' and today:
+                    try:
+                        ledger_paths = [
+                            '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/02_0942_Hybrid_Model/live_production/daily_0940_live_ledger.csv',
+                            '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/02_0942_Hybrid_Model/live_production/audited_0940_hybrid_trades.csv',
+                            '/home/ubuntu/sarang_shortsell_t1_2026/02_0942_Hybrid_Model/audited_0940_hybrid_trades.csv',
+                            '/home/ubuntu/live_production0940_model/daily_0940_live_ledger.csv'
+                        ]
+                        for lp in ledger_paths:
+                            if os.path.exists(lp):
+                                ldf = pd.read_csv(lp, low_memory=False)
+                                mask = (ldf['date'].astype(str) == str(today)) & (
+                                    (ldf['stockname'].astype(str).str.upper() == stockname.upper()) |
+                                    (ldf.get('clean_stock', pd.Series('', index=ldf.index)).astype(str).str.upper() == stockname.upper())
+                                )
+                                if mask.any():
+                                    ldf.loc[mask, 'total_quantity'] = new_qty
+                                    ldf.to_csv(lp, index=False)
+                    except Exception as le:
+                        log_print(f"    ⚠️ Ledger quantity sync warning for {stockname}: {le}")
+
+                return new_qty
+
+        log_print(
+            f"  ✅ [KOTAK MARGIN OK] {stockname}: Kotak Margin={margin_pct:.2f}% ({eff_leverage:.2f}x leverage) | "
+            f"Actual Margin=₹{ord_mrgn:,.0f} (Cap: ₹{max_actual_margin:,.0f}) | Qty={db_qty} unchanged"
+        )
+        return db_qty
+    except Exception as e:
+        log_print(f"  ⚠️  [MARGIN CHECK FALLBACK] Error checking margin for {stockname}: {e} — keeping Qty={db_qty}")
+        return int(db_qty)
+
 def find_eq_scripcode(stockname):
     """
     For Kotak Neo nse_cm (cash market) segment, the trading_symbol format is:
@@ -553,18 +673,33 @@ def _run_orders(model_name, today):
                 log_print(f"  ⚠️  No scripcode found for {stockname}, using symbol directly")
                 scripcode = stockname
 
-            log_print(f"\n  ── {stockname} | Qty={quantity} | Price={limit_price_fmt} | OrderType={order_type_val} | Scripcode={scripcode}")
-
             # Skip guards
             if stockname in open_short_stocks:
+                log_print(f"\n  ── {stockname} | Qty={quantity} | Price={limit_price_fmt} | OrderType={order_type_val} | Scripcode={scripcode}")
                 log_print(f"  ⏭️  Already in short position → skipping {stockname}")
                 _update_isvalid(db_id, '4')
                 continue
 
             if stockname in completed_sells:
+                log_print(f"\n  ── {stockname} | Qty={quantity} | Price={limit_price_fmt} | OrderType={order_type_val} | Scripcode={scripcode}")
                 log_print(f"  ⏭️  Already filled SELL today → skipping {stockname}")
                 _update_isvalid(db_id, '2')
                 continue
+
+            # Kotak Neo Live Margin Check & Safe Cap (0920_SCALP: ₹1.0L actual margin | 0942_HYBRID: ₹1.5L/₹2.0L actual margin)
+            quantity = adjust_qty_for_kotak_margin(
+                client=client,
+                stockname=stockname,
+                price=price,
+                db_qty=quantity,
+                db_price=db_price,
+                model_name=model_name,
+                db_id=db_id,
+                today=today
+            )
+            o['quantity'] = quantity
+
+            log_print(f"\n  ── {stockname} | Qty={quantity} | Price={limit_price_fmt} | OrderType={order_type_val} | Scripcode={scripcode}")
 
             # Place with 3 retries
             placed = False

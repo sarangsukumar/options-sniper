@@ -71,24 +71,40 @@ params_920 = {
     'random_state': 42
 }
 
-print("3. Training Walk-Forward Expanding Window Model...")
+print("3. Training Half-Yearly (6M) Walk-Forward Expanding Window Model (Jan 1 & Jul 1)...")
 all_oos_920 = []
-for y in range(2020, 2027):
-    tr = df_920[df_920['year'] < y]
-    te = df_920[df_920['year'] == y].copy()
-    if len(tr) == 0 or len(te) == 0: continue
-    
-    mod = lgb.train(
-        params_920,
-        lgb.Dataset(tr[features_920], label=tr['target']),
-        num_boost_round=300
-    )
-    te['prob'] = mod.predict(te[features_920])
-    all_oos_920.append(te)
+latest_mod = None
+latest_cutoff = None
+
+for y in range(2020, 2028):
+    for h, (start_d, end_d) in enumerate([
+        (f"{y}-01-01", f"{y}-06-30"),
+        (f"{y}-07-01", f"{y}-12-31")
+    ], start=1):
+        tr = df_920[df_920['short_date'] < start_d]
+        te = df_920[(df_920['short_date'] >= start_d) & (df_920['short_date'] <= end_d)].copy()
+        if len(tr) == 0 or len(te) == 0:
+            continue
+
+        print(f"   • {y}-H{h} ({start_d} to {end_d}): Training on {len(tr):,} rows (< {start_d}) -> Predicting {len(te):,} rows")
+        mod = lgb.train(
+            params_920,
+            lgb.Dataset(tr[features_920], label=tr['target']),
+            num_boost_round=300
+        )
+        te['prob'] = mod.predict(te[features_920])
+        all_oos_920.append(te)
+        latest_mod = mod
+        latest_cutoff = start_d
 
 oos_920 = pd.concat(all_oos_920).sort_values(['short_date', 'prob'], ascending=[True, False])
 top4_920 = oos_920.groupby('short_date').head(4).reset_index(drop=True)
 
 out_file = os.path.join(BASE_DIR, '0920_predictions.csv')
 top4_920[['short_date', 'clean_stock', 'prob']].to_csv(out_file, index=False)
-print(f"✅ Success! Predictions saved to {out_file}")
+print(f"✅ Success! Half-Yearly OOS Predictions saved to {out_file} ({len(top4_920):,} top-4 trades)")
+
+if latest_mod is not None:
+    live_model_path = os.path.join(BASE_DIR, 'live_production', 'lgb_0920_scalp_model.txt')
+    latest_mod.save_model(live_model_path)
+    print(f"✅ Active Half-Yearly Production Model (trained < {latest_cutoff}) saved to {live_model_path}")

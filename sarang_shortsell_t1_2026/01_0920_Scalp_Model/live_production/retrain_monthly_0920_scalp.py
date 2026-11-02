@@ -11,7 +11,7 @@ DATASET_PATH = os.path.join(DIR, 'data/scalp_0920_ml_dataset.csv.gz')
 MODEL_OUTPUT_PATH = os.path.join(DIR, 'lgb_0920_scalp_model.txt')
 
 print("======================================================================")
-print("  MONTHLY RETRAINING ENGINE: 09:20 SCALP V1 MODEL")
+print("  HALF-YEARLY RETRAINING ENGINE: 09:20 SCALP V1 MODEL (JAN 1 & JUL 1)")
 print("======================================================================")
 
 # Step 1: Fetch macro features
@@ -79,11 +79,17 @@ params_920 = {
     'random_state': 42
 }
 
-# Step 3: Train full production model & save model binary
-print(f"3. Retraining Full Model on {len(df)} Historical Samples...")
-train_data = lgb.Dataset(df[features_920], label=df['target'])
+# Step 3: Train Half-Yearly Expanding Window production model & save model binary
+now = pd.Timestamp.now()
+hy_cutoff = f"{now.year}-07-01" if now.month >= 7 else f"{now.year}-01-01"
+df_train = df[df['short_date'] < hy_cutoff].copy()
+if len(df_train) == 0:
+    df_train = df.copy()
+
+print(f"3. Retraining Half-Yearly Model on {len(df_train):,} Historical Samples (short_date < {hy_cutoff}, min={df_train['short_date'].min()}, max={df_train['short_date'].max()})...")
+train_data = lgb.Dataset(df_train[features_920], label=df_train['target'])
 model = lgb.train(params_920, train_data, num_boost_round=300)
 
 model.save_model(MODEL_OUTPUT_PATH)
-print(f"✅ Success! Retrained model saved to: {MODEL_OUTPUT_PATH}")
+print(f"✅ Success! Half-Yearly Retrained model (< {hy_cutoff}) saved to: {MODEL_OUTPUT_PATH}")
 print("======================================================================")
