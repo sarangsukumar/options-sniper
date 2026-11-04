@@ -313,7 +313,11 @@ def main():
     df_feat = pd.read_csv(HIST_DATASET, low_memory=False)
     df_feat['clean_stock'] = df_feat['clean_stock'].astype(str).str.strip().str.upper()
     df_feat['date_dt'] = pd.to_datetime(df_feat['date_str'])
-    df_feat['year'] = df_feat['date_dt'].dt.year
+    df_feat['year'], df_feat['ym'], df_lots = df_feat['date_dt'].dt.year, df_feat['date_dt'].dt.to_period('M'), pd.read_csv('/home/ubuntu/intraday_simulation/historical_lotsize_new.csv', low_memory=False)
+    # [UPDATE] Point-in-Time Non-Future Priority + Futures Backfill in Top-5
+    df_lots['ym'] = pd.to_datetime(df_lots['expdate'], format='%d/%m/%Y', errors='coerce').dt.to_period('M')
+    active_by_ym = {ym: (set(df_lots[(df_lots['ym'] >= ym) & (df_lots['ym'] <= ym + 2)]['stockname'].str.strip().str.upper()) or set(df_lots[df_lots['ym'] >= df_lots['ym'].max() - 1]['stockname'].str.strip().str.upper())) for ym in df_feat['ym'].unique()}
+    df_feat['in_pit_futures'] = [st in active_by_ym.get(ym, set()) for st, ym in zip(df_feat['clean_stock'], df_feat['ym'])]
     df_feat = df_feat[df_feat['date_dt'].dt.dayofweek != 0].copy()  # Strict Monday Exclusion
     df_feat['short_entry_price'] = pd.to_numeric(df_feat['short_entry_price'], errors='coerce').fillna(0.0)
     df_feat = df_feat[df_feat['short_entry_price'] >= 30.0].copy()  # Training universe >= Rs 30
@@ -394,7 +398,7 @@ def main():
             # LIVE PIPELINE DIFFERENCE 4: Nifty % change from nifty_prev_close (L418-L425)
             nifty_pct = nifty_vs_prev_close.get(d_str, 0.0)
 
-            orig_top4 = day_cands.iloc[:4]
+            orig_top4 = pd.concat([day_cands.iloc[:5][~day_cands.iloc[:5]['in_pit_futures']], day_cands.iloc[:5][day_cands.iloc[:5]['in_pit_futures']], day_cands.iloc[5:]], ignore_index=True).iloc[:4]
             passed = []
             r1_dropped = 0
 
