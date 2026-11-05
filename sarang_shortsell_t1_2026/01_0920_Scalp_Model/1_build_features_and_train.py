@@ -1,4 +1,4 @@
-import os
+import os, pickle, numpy as np
 import pandas as pd
 import yfinance as yf
 import lightgbm as lgb
@@ -45,7 +45,12 @@ features['nifty_vs_nikkei_gap'] = features['nifty_gap'] - features['nikkei_gap']
 global_macro = features[['date_str', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap']]
 
 print("2. Loading Historical Base Features...")
-df_920 = pd.read_csv(os.path.join(BASE_DIR, 'data/scalp_0920_ml_dataset.csv.gz'))
+df_920, df_lots = pd.read_csv(os.path.join(BASE_DIR, 'data/scalp_0920_ml_dataset.csv.gz')), pd.read_csv(os.path.join(BASE_DIR, 'data/historical_lotsize_new.csv'), low_memory=False)
+# [UPDATE 1] Filter training data to Point-in-Time Active F&O universe
+df_lots['ym'], df_920['ym'] = pd.to_datetime(df_lots['expdate'], format='%d/%m/%Y', errors='coerce').dt.to_period('M'), pd.to_datetime(df_920['short_date']).dt.to_period('M')
+active_by_ym = {ym: (set(df_lots[(df_lots['ym'] >= ym) & (df_lots['ym'] <= ym + 2)]['stockname'].str.strip().str.upper()) or set(df_lots[df_lots['ym'] >= df_lots['ym'].max() - 1]['stockname'].str.strip().str.upper())) for ym in df_920['ym'].unique()}
+df_920 = df_920[[st.strip().upper() in active_by_ym.get(ym, set()) for st, ym in zip(df_920['clean_stock'], df_920['ym'])]].copy()
+df_920['short_ret'] = (((df_920['entry_price'] - df_920['exit_price']) / df_920['entry_price']) * 100.0).fillna(((df_920['pnl_net'] / 1000000.0) + 0.0004) * 100.0).fillna(0.0)
 df_920['year'] = pd.to_datetime(df_920['short_date']).dt.year
 df_920 = df_920.merge(global_macro, left_on='short_date', right_on='date_str', how='left')
 
@@ -92,9 +97,14 @@ for y in range(2020, 2028):
             lgb.Dataset(tr[features_920], label=tr['target']),
             num_boost_round=300
         )
-        te['prob'] = mod.predict(te[features_920])
+        # [UPDATE 2] 4-Checkpoint Multi-Temporal Regression Ensemble + Outlier-Trimmed Mean
+        tr_d, p_nb = sorted(tr['short_date'].unique()), {**params_920, 'objective': 'regression', 'metric': 'rmse', 'learning_rate': 0.08}
+        ens_mods = {k: lgb.train(p_nb, lgb.Dataset(tr[tr['short_date'] <= cd][features_920], label=tr[tr['short_date'] <= cd]['short_ret']), num_boost_round=60) for k, cd in {'day': tr_d[-1], 'week': tr_d[max(0, len(tr_d)-5)], 'month': tr_d[max(0, len(tr_d)-21)], 'year': tr_d[max(0, len(tr_d)-126)]}.items()}
+        s_probs = np.sort(np.vstack([ens_mods[k].predict(te[features_920]) for k in ['day', 'week', 'month', 'year']]).T, axis=1)
+        te['prob'], te['tr_ens'] = mod.predict(te[features_920]), (s_probs[:, 1] + s_probs[:, 2]) / 2.0
+        te['prob'] = 0.50 * te.groupby('short_date')['prob'].rank(pct=True) + 0.50 * te.groupby('short_date')['tr_ens'].rank(pct=True)
         all_oos_920.append(te)
-        latest_mod = mod
+        latest_mod, latest_ens = mod, ens_mods
         latest_cutoff = start_d
 
 oos_920 = pd.concat(all_oos_920).sort_values(['short_date', 'prob'], ascending=[True, False])
@@ -107,4 +117,5 @@ print(f"✅ Success! Half-Yearly OOS Predictions saved to {out_file} ({len(top4_
 if latest_mod is not None:
     live_model_path = os.path.join(BASE_DIR, 'live_production', 'lgb_0920_scalp_model.txt')
     latest_mod.save_model(live_model_path)
+    pickle.dump(latest_ens, open(os.path.join(BASE_DIR, 'live_production', 'lgb_0920_ens_checkpoints.pkl'), 'wb'))
     print(f"✅ Active Half-Yearly Production Model (trained < {latest_cutoff}) saved to {live_model_path}")

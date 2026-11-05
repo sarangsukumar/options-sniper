@@ -542,7 +542,12 @@ def train_and_predict_single(df_today):
     # 4. Replacement candidates must meet Quality Gate: stock_pct_940 >= -0.5%
     #    (and pass Crash/Breadth filters). If not met, slot remains empty.
     # ===================================================================
-    original_top4 = df_ranked.head(4).copy()
+    # [UPDATE] Point-in-Time Non-Future Priority + Futures Backfill in Top-5
+    df_lots = pd.read_csv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'historical_lotsize_new.csv'), low_memory=False)
+    df_lots['ym'], ym = pd.to_datetime(df_lots['expdate'], format='%d/%m/%Y', errors='coerce').dt.to_period('M'), pd.to_datetime(today_str).to_period('M')
+    active_futs = set(df_lots[(df_lots['ym'] >= ym) & (df_lots['ym'] <= ym + 2)]['stockname'].str.strip().str.upper()) or set(df_lots[df_lots['ym'] >= df_lots['ym'].max() - 1]['stockname'].str.strip().str.upper())
+    df_ranked['in_pit_futures'] = df_ranked['clean_stock'].isin(active_futs)
+    original_top4 = pd.concat([df_ranked.iloc[:5][~df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[:5][df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[5:]], ignore_index=True).head(4).copy()
 
     print(f"\n   🛡️ APPLYING FILTER RULES TO ORIGINAL TOP 4 CANDIDATES:")
     passed = []

@@ -1,4 +1,4 @@
-import os
+import os, pickle
 import pandas as pd
 import yfinance as yf
 import lightgbm as lgb
@@ -54,7 +54,12 @@ global_macro = features[['date_str', 'nifty_gap', 'sp500_overnight_ret', 'nikkei
 
 # Step 2: Load historical base features
 print("2. Loading Historical Base Dataset...")
-df = pd.read_csv(DATASET_PATH)
+df, df_lots = pd.read_csv(DATASET_PATH), pd.read_csv(os.path.join(DIR, 'data/historical_lotsize_new.csv'), low_memory=False)
+# [UPDATE 1] Filter training data to Point-in-Time Active F&O universe
+df_lots['ym'], df['ym'] = pd.to_datetime(df_lots['expdate'], format='%d/%m/%Y', errors='coerce').dt.to_period('M'), pd.to_datetime(df['short_date']).dt.to_period('M')
+active_by_ym = {ym: (set(df_lots[(df_lots['ym'] >= ym) & (df_lots['ym'] <= ym + 2)]['stockname'].str.strip().str.upper()) or set(df_lots[df_lots['ym'] >= df_lots['ym'].max() - 1]['stockname'].str.strip().str.upper())) for ym in df['ym'].unique()}
+df = df[[st.strip().upper() in active_by_ym.get(ym, set()) for st, ym in zip(df['clean_stock'], df['ym'])]].copy()
+df['short_ret'] = (((df['entry_price'] - df['exit_price']) / df['entry_price']) * 100.0).fillna(((df['pnl_net'] / 1000000.0) + 0.0004) * 100.0).fillna(0.0)
 df = df.merge(global_macro, left_on='short_date', right_on='date_str', how='left')
 
 features_920 = [
@@ -91,5 +96,8 @@ train_data = lgb.Dataset(df_train[features_920], label=df_train['target'])
 model = lgb.train(params_920, train_data, num_boost_round=300)
 
 model.save_model(MODEL_OUTPUT_PATH)
+# [UPDATE 2] Train & save 4-Checkpoint Multi-Temporal Regression Ensemble (day, week, month, year)
+tr_d, p_nb = sorted(df_train['short_date'].unique()), {**params_920, 'objective': 'regression', 'metric': 'rmse', 'learning_rate': 0.08}
+pickle.dump({k: lgb.train(p_nb, lgb.Dataset(df_train[df_train['short_date'] <= cd][features_920], label=df_train[df_train['short_date'] <= cd]['short_ret']), num_boost_round=60) for k, cd in {'day': tr_d[-1], 'week': tr_d[max(0, len(tr_d)-5)], 'month': tr_d[max(0, len(tr_d)-21)], 'year': tr_d[max(0, len(tr_d)-126)]}.items()}, open(os.path.join(DIR, 'lgb_0920_ens_checkpoints.pkl'), 'wb'))
 print(f"✅ Success! Half-Yearly Retrained model (< {hy_cutoff}) saved to: {MODEL_OUTPUT_PATH}")
 print("======================================================================")

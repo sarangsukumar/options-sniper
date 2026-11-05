@@ -28,7 +28,7 @@
 import os
 import sys
 import time
-import json
+import json, pickle
 import subprocess
 import argparse
 import warnings
@@ -347,8 +347,13 @@ def select_top4(df_features, macro, today_str, dry_run=False):
 
     df_features[FEATURES_920] = df_features[FEATURES_920].fillna(0.0)
 
-    # Score all candidate stocks
-    df_features['prob'] = model.predict(df_features[FEATURES_920])
+    # [UPDATE] Filter to Point-in-Time Active F&O universe & score with 4-Checkpoint Trimmed Ensemble
+    df_lots = pd.read_csv(os.path.join(SCRIPT_DIR, 'data', 'historical_lotsize_new.csv'), low_memory=False)
+    df_lots['ym'], ym = pd.to_datetime(df_lots['expdate'], format='%d/%m/%Y', errors='coerce').dt.to_period('M'), pd.to_datetime(today_str).to_period('M')
+    active_futs = set(df_lots[(df_lots['ym'] >= ym) & (df_lots['ym'] <= ym + 2)]['stockname'].str.strip().str.upper()) or set(df_lots[df_lots['ym'] >= df_lots['ym'].max() - 1]['stockname'].str.strip().str.upper())
+    df_features, ens_mods = df_features[df_features['clean_stock'].isin(active_futs)].copy().reset_index(drop=True), pickle.load(open(os.path.join(MODEL_DIR, 'lgb_0920_ens_checkpoints.pkl'), 'rb'))
+    s_probs = np.sort(np.vstack([ens_mods[k].predict(df_features[FEATURES_920]) for k in ['day', 'week', 'month', 'year']]).T, axis=1)
+    df_features['prob'] = 0.50 * pd.Series(model.predict(df_features[FEATURES_920])).rank(pct=True) + 0.50 * pd.Series((s_probs[:, 1] + s_probs[:, 2]) / 2.0).rank(pct=True)
     df_features = df_features.sort_values('prob', ascending=False).reset_index(drop=True)
 
     top4 = df_features.head(4).copy()
