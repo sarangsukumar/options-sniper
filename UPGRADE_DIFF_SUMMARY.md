@@ -89,6 +89,30 @@ This update applies the verified, audited engineering enhancements from the **07
 
 ---
 
+## 📑 Standardized Database-Verifiable Trade Ledger CSVs
+
+To allow any reviewer with MySQL (`markets.scrapdata`) access to independently verify trade executions and PnL, standardized 10-column CSV ledgers (`date, stockname, qty, entry_time, entry_price, exit_time, exit_price, gross_pnl, commission, net_pnl`) have been generated and added to the repository (along with [`HOW_TO_VERIFY_LEDGER_IN_DB.md`](HOW_TO_VERIFY_LEDGER_IN_DB.md)):
+
+| Model & Sizing (`₹2L Margin / ₹10L Notional per Order`) | CSV File Path | Trades | Win Rate | Gross PnL | Commission | **Verified Net PnL** |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **09:20 Scalp (Top 2 @ ₹2L)** *(₹4L Margin)* | `02_live_production_pipelines/0920_scalp_pipeline/verified_0920_scalp_top2_ledger.csv` | `3,069` | **81.46%** | `+₹92.59L` | `-₹9.21L` | **`+₹83.38 Lakhs`** |
+| **09:20 Scalp (Top 4 @ ₹2L)** *(₹8L Margin)* | `02_live_production_pipelines/0920_scalp_pipeline/verified_0920_scalp_trade_ledger.csv` | `6,120` | **77.97%** | `+₹156.17L` | `-₹18.36L` | **`+₹137.81 Lakhs`** |
+| **09:40 Hybrid (Top 4 @ ₹2L)** *(₹8L Margin)* | `02_live_production_pipelines/0940_hybrid_pipeline/verified_0940_hybrid_trade_ledger.csv` | `5,285` | **55.72%** *(Static)* / **66.85%** *(4-Stage)* | `+₹122.58L` | `-₹21.48L` | **`+₹101.10L`** *(Static)* / **`+₹114.65L`** *(4-Stage)* |
+| **09:40 Hybrid (Top 2 @ ₹2L)** *(₹4L Margin)* | `02_live_production_pipelines/0940_hybrid_pipeline/verified_0940_hybrid_top2_ledger.csv` | `2,668` | **56.26%** *(Static)* / **67.27%** *(4-Stage)* | `+₹70.85L` | `-₹10.85L` | **`+₹60.00L`** *(Static)* / **`+₹66.33L`** *(4-Stage)* |
+| **Combined Master Ledger** *(M1 Top 2 + M2 Top 4)* | `sarang_2026_liveproduction_shortsellmodels/verified_all_models_trade_ledger.csv` | `8,354` | **65.18%** *(Static)* | `+₹215.17L` | `-₹30.69L` | **`+₹184.48L`** *(Static)* / **`+₹198.03L`** *(4-Stage)* |
+
+### SQL Verification Query against `markets.scrapdata`:
+```sql
+SELECT date, stockname, TIME(time) AS tick_time, open, high, low, close AS db_price
+FROM markets.scrapdata
+WHERE date = '2020-01-01'
+  AND stockname = 'AMBUJACEM'
+  AND TIME(time) IN ('09:25:00', '09:36:00', '09:40:00', '09:42:00', '14:45:00')
+ORDER BY time ASC;
+```
+
+---
+
 ## 🧪 How to Verify and Run Dry Runs
 
 ### Model 1 Dry Run:
