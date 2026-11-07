@@ -418,6 +418,13 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     print("=" * 75)
 
     # Save CSV output
+    if os.environ.get('PUT_OPTION_MODE') == '1':
+        top2['put_option_capital_per_stock'] = 100000
+        top2['put_option_max_daily_capital'] = 200000
+        top2['put_option_strike_role'] = '1_OTM_PE_OR_ATM_PE'
+        top2['put_option_exit_policy'] = os.environ.get('PUT_OPTION_POLICY', 'FastLock_WR_Boost')
+        top2['put_option_expiry_skip_days'] = 4
+        print(f"   🔥 [PUT OPTION BUY MODE ACTIVE] ₹1.0L/Stock (Max ₹2.0L/Day) | Role: 1_OTM_PE/ATM_PE | Policy: {top2['put_option_exit_policy'].iloc[0]} | Skip Last 4 Days of Expiry")
     top2.to_csv(OUTPUT_CSV, index=False)
     print(f"\n✔ Plan saved to: {OUTPUT_CSV}")
 
@@ -470,7 +477,12 @@ if __name__ == '__main__':
     parser.add_argument('--date', type=str, default=None, help="Target Date YYYY-MM-DD (defaults to latest in DB)")
     parser.add_argument('--no-telegram', action='store_true', help="Skip sending Telegram alert")
     parser.add_argument('--retrain', action='store_true', help="Retrain model and exit (weekly cron)")
+    parser.add_argument('--put-option-mode', action='store_true', help="Enable Put Option Buying mode (₹1L/stock, Max ₹2L/day, skip <=4d to expiry)")
+    parser.add_argument('--put-option-policy', type=str, default='FastLock_WR_Boost', choices=['FastLock_WR_Boost', 'ExactSync_0920', 'SmartSync_0920'], help="Put Option exit policy for 09:20 Scalp")
     args = parser.parse_args()
+    if args.put_option_mode:
+        os.environ['PUT_OPTION_MODE'] = '1'
+        os.environ['PUT_OPTION_POLICY'] = args.put_option_policy
 
     if args.retrain:
         retrain_and_save_model()

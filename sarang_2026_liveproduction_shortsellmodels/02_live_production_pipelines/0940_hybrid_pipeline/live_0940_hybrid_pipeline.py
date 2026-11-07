@@ -408,6 +408,10 @@ def train_and_predict_single(df_today):
     else:
         print(f"\n2. ⚠️  Audited model not found — Training Rebound-Aware model now...")
         mod = retrain_and_save_model()
+    fno_model_path = os.path.join(os.path.dirname(MODEL_FILE), 'lgb_0940_fno_only_rebound_aware_model.txt')
+    if os.environ.get('FNO_ONLY_OPTIONS_MODE') == '1' and os.path.exists(fno_model_path):
+        mod = lgb.Booster(model_file=fno_model_path)
+        print(f"   ✔ [EXCLUSIVE F&O OPTION MODE] Loaded Remodeled F&O-Only 09:40 Model: {fno_model_path} ({len(mod.feature_name())} features)")
 
     print("   • Scoring today's candidates with 12 Rebound-Aware Features...")
     for f in PURE_DB_FEATURES:
@@ -563,6 +567,9 @@ def train_and_predict_single(df_today):
     _nf_confirmed_10 = _top10_pool[_top10_pool['is_non_future'] & (_top10_pool['ens_4freq_score'] >= 0.96)]
     _others_10 = _top10_pool.drop(_nf_confirmed_10.index)
     df_ranked = pd.concat([_nf_confirmed_10, _others_10, df_ranked.iloc[10:].copy()], ignore_index=True)
+    if os.environ.get('FNO_ONLY_OPTIONS_MODE') == '1':
+        df_ranked = df_ranked[df_ranked['in_pit_futures']].sort_values('pred_return', ascending=True).reset_index(drop=True)
+        print(f"   🎯 [EXCLUSIVE F&O OPTION MODE] Filtered to {len(df_ranked)} Point-in-Time F&O stocks (100% Put Option availability).")
     original_top4 = df_ranked.head(4).copy()
 
     print(f"\n   🛡️ APPLYING FILTER RULES TO ORIGINAL TOP 4 CANDIDATES:")
@@ -752,6 +759,13 @@ def apply_sniper_and_hybrid_execution_plan(df_plan, target_date_str, execution_m
             for i in range(len(df_out))
         ]
         print(f"   🔥 [HYBRID 2+2 MODE ACTIVE] Best 2 (Rank #1 & #2) enter @ 09:42 AM + Remaining 2 slots on First-2 Confirmations (09:43-10:45 AM | {sniper_exit}).")
+    if os.environ.get('FNO_ONLY_OPTIONS_MODE') == '1':
+        df_out['put_option_capital_per_stock'] = 100000
+        df_out['put_option_max_daily_capital'] = 200000
+        df_out['put_option_strike_role'] = '1_ITM_PE_OR_ATM_PE'
+        df_out['put_option_exit_policy'] = os.environ.get('PUT_OPTION_POLICY_0940', 'Sync_Hybrid_B_MaxPnL')
+        df_out['put_option_expiry_skip_days'] = 4
+        print(f"   🔥 [09:40 PUT OPTION SNIPER MODE] First-2 Confirmed (09:43-10:45 AM) | ₹1.0L/Stock (Max ₹2.0L/Day) | Strike: 1_ITM_PE/ATM_PE | Exit: {df_out['put_option_exit_policy'].iloc[0]} | Skip <=4d to Expiry")
     return df_out
 
 def main():
@@ -762,7 +776,13 @@ def main():
     parser.add_argument('--no-telegram', action='store_true', help='Skip telegram alerts')
     parser.add_argument('--execution-mode', type=str, default='hybrid_2plus2', choices=['hybrid_2plus2', 'sniper_first2', 'fixed_0942'], help='Execution mode: hybrid_2plus2 (2@09:42 + 2@Confirm), sniper_first2 (First-2 Confirmed 09:43-10:45), or fixed_0942')
     parser.add_argument('--sniper-exit', type=str, default='W80', choices=['W80', 'W81', 'X4', 'X5'], help='Ratchet exit profile for confirmed sniper trades (W80, W81, X4, X5)')
+    parser.add_argument('--fno-only-options', action='store_true', help='Enable Exclusive F&O-Only Put Option Buying mode (First-2 Confirmed Sniper 09:43-10:45 AM, ₹1L/stock, Max ₹2L/day, skip <=4d to expiry)')
+    parser.add_argument('--put-option-policy', type=str, default='Sync_Hybrid_B_MaxPnL', choices=['Sync_Hybrid_B_MaxPnL', 'Sync_Hybrid_A_WR85', 'OPT_W83_SweetSpot', 'OPT_W90_UltraFast', 'ExactSync_W80'], help='Put Option exit strategy for 09:40 F&O Confirmed Sniper')
     args = parser.parse_args()
+    if args.fno_only_options:
+        os.environ['FNO_ONLY_OPTIONS_MODE'] = '1'
+        os.environ['PUT_OPTION_POLICY_0940'] = args.put_option_policy
+        args.execution_mode = 'sniper_first2'
 
     # Weekly retrain mode — retrain and save model, then exit
     if args.retrain:
