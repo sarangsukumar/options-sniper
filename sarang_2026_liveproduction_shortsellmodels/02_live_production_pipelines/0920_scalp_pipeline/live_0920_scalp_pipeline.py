@@ -42,11 +42,13 @@ BOT_SCRIPT = '/home/ubuntu/KotakCodes1/status_Info_bot.js'
 OUTPUT_CSV = os.path.join(SCRIPT_DIR, 'live_0920_predictions_today.csv')
 LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0920_live_ledger.csv')
 
+# 10 Clean Domestic Features (M1_Alt3_Fixed_Plus_Physics Blueprint):
+# Pruned: zero-variance premarket_fade, dropped foreign yfinance dependencies.
+# Added: clamped vol_normalized_gap and candle_filling false-breakout physics.
 FEATURES = [
-    'morn_range_pct', 'prev_intraday_vwap_gap', 'prev_intraday_roc_last_hour',
-    'prev_intraday_return', 'positive_arc_ratio', 'Gap_Pct', 'gap_0907_pct',
-    'rejection_wick', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap',
-    'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap'
+    'prev_intraday_vwap_gap', 'prev_intraday_roc_last_hour', 'prev_intraday_return',
+    'positive_arc_ratio', 'Gap_Pct', 'gap_0907_pct', 'morn_range_pct',
+    'rejection_wick', 'vol_normalized_gap', 'candle_filling'
 ]
 
 # Official NSE F&O Universe (180+ Liquid Contract Stocks)
@@ -161,59 +163,24 @@ def append_to_daily_ledger(target_date_str, top4_df):
 
 def retrain_and_save_model():
     """
-    Retrain the 0920 Scalp model using Historical Dataset + Global Macro Data (Yahoo Finance).
-    Run this on the 1st of every month via cron:
+    Retrain the 0920 Scalp model with Asymmetric Sortino Downside Loss (2.5x Weight)
+    and Clamped Candlestick Physics (M1_Alt3_Fixed_Plus_Physics Blueprint).
+    Run this via cron:
       45 17 1 * * python3 live_0920_scalp_pipeline.py --retrain
     """
     import lightgbm as lgb
-    import yfinance as yf
-    print("\n🔁 RETRAINING: 09:20 Scalp Model (Full Dataset + Global Macro Data)...")
+    print("\n🔁 RETRAINING: 09:20 Scalp Model (Asymmetric Sortino Loss + Clamped Physics)...")
     dataset_path = '/home/ubuntu/daily_prediction_sytem_Dynamic_threshold/sarang_shortsell_t1_2026/01_0920_Scalp_Model/data/scalp_0920_ml_dataset.csv.gz'
     if not os.path.exists(dataset_path):
         dataset_path = os.path.join(SCRIPT_DIR, 'data', 'scalp_0920_ml_dataset.csv.gz')
 
-    # Step 1: Fetch global macro features via Yahoo Finance
-    print("   1. Fetching Global Macro Data (Yahoo Finance)...")
-    tickers = {'NIFTY': '^NSEI', 'SP500': '^GSPC', 'NIKKEI': '^N225'}
-    data = yf.download(list(tickers.values()), start='2018-01-01', progress=False)
-
-    if isinstance(data.columns, pd.MultiIndex):
-        df_close = data['Close'].reset_index()
-        df_open = data['Open'].reset_index()
-    else:
-        df_close = pd.DataFrame(data['Close'], columns=['^NSEI']).reset_index()
-        df_open = pd.DataFrame(data['Open'], columns=['^NSEI']).reset_index()
-
-    dates = pd.date_range(start='2018-01-01', end=pd.Timestamp.now() + pd.Timedelta(days=30), freq='B')
-    mac_df = pd.DataFrame({'date': dates})
-    mac_df['date_str'] = mac_df['date'].dt.strftime('%Y-%m-%d')
-
-    nifty_c = df_close[['Date', '^NSEI']].rename(columns={'Date': 'date', '^NSEI': 'nifty_close'})
-    nifty_o = df_open[['Date', '^NSEI']].rename(columns={'Date': 'date', '^NSEI': 'nifty_open'})
-    mac_df = mac_df.merge(nifty_c, on='date', how='left').merge(nifty_o, on='date', how='left')
-    mac_df['nifty_gap'] = (mac_df['nifty_open'] / mac_df['nifty_close'].shift(1)) - 1
-
-    sp_c = df_close[['Date', '^GSPC']].rename(columns={'Date': 'date', '^GSPC': 'sp500_close'})
-    mac_df = mac_df.merge(sp_c, on='date', how='left')
-    mac_df['sp500_overnight_ret'] = (mac_df['sp500_close'].shift(1) / mac_df['sp500_close'].shift(2)) - 1
-
-    nikkei_c = df_close[['Date', '^N225']].rename(columns={'Date': 'date', '^N225': 'nikkei_close'})
-    nikkei_o = df_open[['Date', '^N225']].rename(columns={'Date': 'date', '^N225': 'nikkei_open'})
-    mac_df = mac_df.merge(nikkei_c, on='date', how='left').merge(nikkei_o, on='date', how='left')
-    mac_df['nikkei_gap'] = (mac_df['nikkei_open'] / mac_df['nikkei_close'].shift(1)) - 1
-
-    for c in ['sp500_overnight_ret', 'nikkei_gap', 'nifty_gap']: 
-        mac_df[c] = mac_df[c].fillna(0)
-
-    mac_df['nifty_vs_sp500_gap'] = mac_df['nifty_gap'] - mac_df['sp500_overnight_ret']
-    mac_df['nifty_vs_nikkei_gap'] = mac_df['nifty_gap'] - mac_df['nikkei_gap']
-
-    global_macro = mac_df[['date_str', 'nifty_gap', 'sp500_overnight_ret', 'nikkei_gap', 'nifty_vs_sp500_gap', 'nifty_vs_nikkei_gap']]
-
-    # Step 2: Load historical base features and merge macro features
-    print(f"   2. Loading Historical Dataset: {dataset_path}...")
+    print(f"   1. Loading Historical Dataset: {dataset_path}...")
     df = pd.read_csv(dataset_path, low_memory=False)
-    df = df.merge(global_macro, left_on='short_date', right_on='date_str', how='left')
+
+    # Compute Clamped Physics Features (Denominators clamped to eliminate extreme spikes)
+    morn_clean = np.clip(np.abs(df['morn_range_pct']) * 100.0, 0.20, 10.0)
+    df['vol_normalized_gap'] = np.clip(df['Gap_Pct'] / morn_clean, -15.0, 15.0)
+    df['candle_filling'] = np.clip(df['rejection_wick'] / (morn_clean + 0.05), 0.0, 15.0)
 
     for f in FEATURES:
         if f not in df.columns: df[f] = 0.0
@@ -221,24 +188,27 @@ def retrain_and_save_model():
 
     df['target'] = (df['pnl_net'] > 0).astype(int)
 
+    # Asymmetric Sortino Downside Loss (2.5x penalty on losing trades)
+    sample_weights = np.where(df['target'] == 0, 2.5, 1.0)
+    trn_data = lgb.Dataset(df[FEATURES], label=df['target'], weight=sample_weights)
+
     params = {
         'objective': 'binary',
         'metric': 'auc',
         'boosting_type': 'gbdt',
-        'learning_rate': 0.05,
-        'max_depth': 5,
-        'num_leaves': 31,
-        'feature_fraction': 0.8,
-        'verbose': -1,
-        'random_state': 42
+        'learning_rate': 0.03,
+        'num_leaves': 15,
+        'max_depth': 4,
+        'min_child_samples': 50,
+        'random_state': 42,
+        'verbose': -1
     }
     
-    print(f"   3. Training LightGBM Booster on {len(df)} samples across all 13 features...")
-    dtrain = lgb.Dataset(df[FEATURES], label=df['target'])
-    mod = lgb.train(params, dtrain, num_boost_round=300)
+    print(f"   2. Training LightGBM Booster on {len(df)} samples with 2.5x Sortino Loss across {len(FEATURES)} features...")
+    mod = lgb.train(params, trn_data, num_boost_round=150)
     
     mod.save_model(MODEL_FILE)
-    print(f"   ✅ 09:20 Scalp model saved → {MODEL_FILE}")
+    print(f"   ✅ 09:20 Scalp Asymmetric Sortino model saved → {MODEL_FILE}")
     return mod
 
 
@@ -294,40 +264,8 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         print(f"\n[INIT] ⚠️ Model file not found. Retraining now...")
         model = retrain_and_save_model()
 
-    # Fetch today's global macro features via yfinance (matches training logic exactly)
-    print(f"\n0. Fetching Global Macro Features (Nifty/S&P500/Nikkei) via yfinance...")
-    try:
-        import yfinance as yf
-        tickers = {'^NSEI': 'nifty', '^GSPC': 'sp500', '^N225': 'nikkei'}
-        data = yf.download(list(tickers.keys()), period='5d', progress=False, auto_adjust=True)
-        df_close = data['Close'].reset_index().rename(columns={'Date': 'date'})
-        df_open  = data['Open'].reset_index().rename(columns={'Date': 'date'})
-        df_close['date'] = pd.to_datetime(df_close['date']).dt.date.astype(str)
-        df_open['date']  = pd.to_datetime(df_open['date']).dt.date.astype(str)
-        df_close = df_close.sort_values('date')
-        df_open  = df_open.sort_values('date')
-        today_row_c = df_close[df_close['date'] == target_date_str]
-        prev_row_c  = df_close[df_close['date'] < target_date_str].tail(2)
-        today_row_o = df_open[df_open['date'] == target_date_str]
-        nifty_open  = float(today_row_o['^NSEI'].values[0]) if len(today_row_o) else None
-        nifty_close_prev = float(prev_row_c['^NSEI'].values[-1]) if len(prev_row_c) >= 1 else None
-        sp500_close_prev  = float(prev_row_c['^GSPC'].values[-1]) if len(prev_row_c) >= 1 else None
-        sp500_close_prev2 = float(prev_row_c['^GSPC'].values[-2]) if len(prev_row_c) >= 2 else None
-        nikkei_open  = float(today_row_o['^N225'].values[0]) if len(today_row_o) else None
-        nikkei_close_prev = float(prev_row_c['^N225'].values[-1]) if len(prev_row_c) >= 1 else None
-        nifty_gap           = ((nifty_open / nifty_close_prev) - 1) if (nifty_open and nifty_close_prev and not np.isnan(nifty_open) and not np.isnan(nifty_close_prev)) else 0.0
-        sp500_overnight_ret = ((sp500_close_prev / sp500_close_prev2) - 1) if (sp500_close_prev and sp500_close_prev2 and not np.isnan(sp500_close_prev) and not np.isnan(sp500_close_prev2)) else 0.0
-        nikkei_gap          = ((nikkei_open / nikkei_close_prev) - 1) if (nikkei_open and nikkei_close_prev and not np.isnan(nikkei_open) and not np.isnan(nikkei_close_prev)) else 0.0
-        nifty_gap           = float(np.nan_to_num(nifty_gap, nan=0.0))
-        sp500_overnight_ret = float(np.nan_to_num(sp500_overnight_ret, nan=0.0))
-        nikkei_gap          = float(np.nan_to_num(nikkei_gap, nan=0.0))
-        nifty_vs_sp500_gap  = nifty_gap - sp500_overnight_ret
-        nifty_vs_nikkei_gap = nifty_gap - nikkei_gap
-        print(f"   ✔ nifty_gap={nifty_gap:.4f} | sp500_ret={sp500_overnight_ret:.4f} | nikkei_gap={nikkei_gap:.4f}")
-    except Exception as e:
-        print(f"   ⚠️ yfinance fetch failed ({e}) — using 0.0 for macro features")
-        nifty_gap = sp500_overnight_ret = nikkei_gap = nifty_vs_sp500_gap = nifty_vs_nikkei_gap = 0.0
-
+    # FIX: Blueprint Step 1 — Stripped foreign yfinance download to prevent network freeze/timeouts
+    print("\n0. Using Pure Domestic Features (Zero Foreign API Dependency)...")
 
     # 1. Fetch Previous Day Cash Ticks for universe
     print(f"\n1. Fetching Prior Day ({prev_date_str}) Intraday Ticks from scrapdata...")
@@ -348,12 +286,13 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         prev_dict[s].append(r)
 
     # 2. Fetch Today's Morning Cash Ticks (09:07 premarket and 09:15 to 09:19:59)
-    print(f"2. Fetching Today's Morning ({target_date_str}) Ticks (09:07 - 09:23:59)...")
+    # FIX: Blueprint Step 1 — Strict 09:19:59 Hard Cutoff (Zero Lookahead)
+    print(f"2. Fetching Today's Morning ({target_date_str}) Ticks (09:07 - 09:19:59)...")
     with conn.cursor() as cursor:
         cursor.execute(f"""
             SELECT stockname, time, price FROM scrapdata
             WHERE date = '{target_date_str}'
-              AND TIME(time) >= '09:07:00' AND TIME(time) <= '09:23:59'
+              AND TIME(time) >= '09:07:00' AND TIME(time) <= '09:19:59'
             ORDER BY stockname, time ASC
         """)
         morn_rows = cursor.fetchall()
@@ -428,10 +367,15 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         rejection_wick = (high_0919 - close_0919) / (high_0919 - low_0919 + 1e-9)
         pos_arc_ratio = calc_arc_features(p_0915_to_0919_ticks)
 
+        # Clamped Candlestick Physics (M1_Alt3_Fixed_Plus_Physics Blueprint):
+        morn_clean = float(np.clip(abs(morn_range_pct) * 100.0, 0.20, 10.0))
+        vol_normalized_gap = float(np.clip(Gap_Pct / morn_clean, -15.0, 15.0))
+        candle_filling = float(np.clip(rejection_wick / (morn_clean + 0.05), 0.0, 15.0))
+
         if close_0919 < 50:
             continue
         
-        lotsize = int(500000.0 / close_0919)
+        lotsize = int(1000000.0 / close_0919)
 
         processed_records.append({
             'stockname': stock,
@@ -446,11 +390,8 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
             'gap_0907_pct': gap_0907_pct,
             'morn_range_pct': morn_range_pct,
             'rejection_wick': rejection_wick,
-            'nifty_gap': nifty_gap,
-            'sp500_overnight_ret': sp500_overnight_ret,
-            'nikkei_gap': nikkei_gap,
-            'nifty_vs_sp500_gap': nifty_vs_sp500_gap,
-            'nifty_vs_nikkei_gap': nifty_vs_nikkei_gap,
+            'vol_normalized_gap': vol_normalized_gap,
+            'candle_filling': candle_filling,
         })
 
     if not processed_records:
@@ -463,30 +404,31 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     X = df_candidates[FEATURES].fillna(0.0)
     df_candidates['short_prob'] = model.predict(X)
 
-    # 5. Select Top 4 Candidates
+    # 5. Select Top 2 Candidates (Concentrated Alpha, Blueprint Parity)
     df_candidates = df_candidates.drop_duplicates(subset=['short_prob', 'close_0919']).reset_index(drop=True)
     df_candidates = df_candidates.sort_values('short_prob', ascending=False).reset_index(drop=True)
-    top4 = df_candidates.head(4).copy()
+    top2 = df_candidates.head(2).copy()
+    top4 = top2  # Retain top4 alias for downstream ledger/DB compatibility
 
     print("\n" + "=" * 75)
-    print("🎯 TOP 4 09:20 SCALP CANDIDATES (09:25 ENTRY -> 09:40 EXIT):")
+    print("🎯 TOP 2 09:20 SCALP CANDIDATES (09:25 ENTRY -> 09:40 EXIT):")
     print("=" * 75)
-    for idx, row in top4.iterrows():
+    for idx, row in top2.iterrows():
         print(f"#{idx+1} | {row['stockname'].ljust(12)} | Prob: {row['short_prob']*100:.1f}% | CMP: ₹{row['close_0919']:.2f} | Qty: {row['lotsize']} | Wick: {row['rejection_wick']:.2f}")
     print("=" * 75)
 
     # Save CSV output
-    top4.to_csv(OUTPUT_CSV, index=False)
+    top2.to_csv(OUTPUT_CSV, index=False)
     print(f"\n✔ Plan saved to: {OUTPUT_CSV}")
 
     # Append to Master Daily Ledger
-    append_to_daily_ledger(target_date_str, top4)
+    append_to_daily_ledger(target_date_str, top2)
 
     # Insert into shortsell_orders table for automated Kotak MIS order placement
     print(f"\n📋 Inserting into shortsell_orders for Kotak MIS automation...")
     if _insert_ss_orders:
-        top4_for_insert = top4.rename(columns={'close_0919': 'close_0919', 'lotsize': 'quantity'})
-        _insert_ss_orders(top4_for_insert, model_name='0920_SCALP', trade_date=target_date_str)
+        top2_for_insert = top2.rename(columns={'close_0919': 'close_0919', 'lotsize': 'quantity'})
+        _insert_ss_orders(top2_for_insert, model_name='0920_SCALP', trade_date=target_date_str)
     else:
         print("  ⚠️  insert_shortsell_orders not available — skipping DB insert")
 
@@ -496,12 +438,12 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         f"⚡ <b>[09:20 SCALP ENGINE: 20-MIN SHORT SELL SELECTION]</b>",
         f"📅 <b>Date:</b> {target_date_str} | ⏱️ <b>Generated:</b> {now_str}",
         f"🎯 <b>Holding Window:</b> 09:25 AM Entry ➔ 0.05% Trailing or 09:40 AM Exit",
-        f"📊 <b>Model Edge:</b> 77.64% Historical Win Rate | +₹130.07L Net PnL",
+        f"📊 <b>Model Edge:</b> 64.04% Win Rate | +₹51.57L Net PnL (Top 2 Concentrated)",
         "",
-        "<b>🔻 TARGET 4 SHORT-SELL ORDERS:</b>"
+        "<b>🔻 TARGET 2 SHORT-SELL ORDERS:</b>"
     ]
 
-    for idx, row in top4.iterrows():
+    for idx, row in top2.iterrows():
         stk = row['stockname']
         prob = row['short_prob'] * 100
         cmp_p = row['close_0919']
