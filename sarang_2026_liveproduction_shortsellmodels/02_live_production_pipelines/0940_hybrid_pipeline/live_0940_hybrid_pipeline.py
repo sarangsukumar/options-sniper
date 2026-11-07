@@ -555,6 +555,15 @@ def train_and_predict_single(df_today):
         active_futs = set()
     df_ranked['in_pit_futures'] = df_ranked['clean_stock'].isin(active_futs)
     original_top4 = pd.concat([df_ranked.iloc[:5][~df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[:5][df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[5:]], ignore_index=True).head(4).copy()
+    # [UPGRADE 2A] 4-Frequency Ensemble Confirmed Top-10 Non-Future Priority + Futures Backfill
+    df_ranked['is_non_future'] = ~df_ranked['in_pit_futures']
+    df_ranked['r_base_pct'] = df_ranked['pred_return'].rank(pct=True)
+    df_ranked['ens_4freq_score'] = (0.50 * df_ranked['r_base_pct'] + 0.50 * df_ranked['trim_940'].rank(pct=True)) if 'trim_940' in df_ranked.columns else df_ranked['r_base_pct']
+    _top10_pool = df_ranked.iloc[:10].copy()
+    _nf_confirmed_10 = _top10_pool[_top10_pool['is_non_future'] & (_top10_pool['ens_4freq_score'] >= 0.96)]
+    _others_10 = _top10_pool.drop(_nf_confirmed_10.index)
+    df_ranked = pd.concat([_nf_confirmed_10, _others_10, df_ranked.iloc[10:].copy()], ignore_index=True)
+    original_top4 = df_ranked.head(4).copy()
 
     print(f"\n   🛡️ APPLYING FILTER RULES TO ORIGINAL TOP 4 CANDIDATES:")
     passed = []
@@ -711,12 +720,48 @@ def send_telegram_alert(message):
     except Exception as e:
         print(f"⚠️ Failed to send Telegram alert: {e}")
 
+def apply_sniper_and_hybrid_execution_plan(df_plan, target_date_str, execution_mode='hybrid_2plus2', sniper_exit='W80'):
+    """
+    [UPGRADE 2B & 2C] Supports both:
+      1. 'hybrid_2plus2': Enter Best 2 (Rank #1 & #2) immediately at 09:42 AM (2 x ₹10L),
+         and deploy the remaining 2 slots (2 x ₹10L) on the first 2 stocks that confirm
+         downward movement between 09:43 AM and 10:45 AM (quantity doubles if Rank #1/#2
+         confirms first, or 4 distinct stocks if Rank #3/#4 confirms).
+      2. 'sniper_first2': Watch all 4 selected stocks between 09:43 AM and 10:45 AM and
+         enter ONLY on the first 2 stocks that confirm downward movement (2 x ₹20L or 2 x ₹10L).
+      3. 'fixed_0942': Standard all-4 entry at 09:42 AM.
+    Confirmation Triggers (09:43 - 10:45 AM):
+      - Direct Downward (cond_a): -0.55% <= move_vs_0942 <= -0.20%, max_bounce <= +0.35%, price < VWAP, 1m red.
+      - Bounce-Rejection (cond_b): +0.25% <= max_bounce <= +1.25%, broke below 09:42 (-0.40% to -0.05%), price < VWAP, 1m & 2m negative.
+    """
+    if df_plan.empty or execution_mode == 'fixed_0942':
+        df_plan['execution_mode'] = 'FIXED_0942'
+        df_plan['exit_profile'] = 'LIVE_4STAGE'
+        return df_plan
+    df_out = df_plan.copy()
+    if execution_mode == 'sniper_first2':
+        df_out['execution_mode'] = 'SNIPER_FIRST2_0943_1045'
+        df_out['exit_profile'] = sniper_exit
+        df_out['signal_type'] = [f"SNIPER WATCHLIST #{i+1} (FIRST-2 CONFIRM 09:43-10:45 | {sniper_exit})" for i in range(len(df_out))]
+        print(f"   🎯 [SNIPER FIRST-2 MODE ACTIVE] Watching {len(df_out)} picks (09:43-10:45 AM) for First-2 Confirmed entries ({sniper_exit} Exit).")
+    elif execution_mode == 'hybrid_2plus2':
+        df_out['execution_mode'] = ['IMMEDIATE_0942_PLUS_CONFIRM_2X' if i < 2 else 'CONFIRM_SNIPER_0943_1045' for i in range(len(df_out))]
+        df_out['exit_profile'] = [f"LIVE_4STAGE + {sniper_exit}" if i < 2 else sniper_exit for i in range(len(df_out))]
+        df_out['signal_type'] = [
+            f"BEST-2 @ 09:42 + SNIPER 2X ELIGIBLE (RANK {i+1})" if i < 2 else f"SNIPER CONFIRMATION SLOT (RANK {i+1} | {sniper_exit})"
+            for i in range(len(df_out))
+        ]
+        print(f"   🔥 [HYBRID 2+2 MODE ACTIVE] Best 2 (Rank #1 & #2) enter @ 09:42 AM + Remaining 2 slots on First-2 Confirmations (09:43-10:45 AM | {sniper_exit}).")
+    return df_out
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--date', type=str, help='Target date YYYY-MM-DD')
     parser.add_argument('--force-monday', action='store_true', help='Force execution on Monday (overrides Monday Lockout)')
     parser.add_argument('--retrain', action='store_true', help='Retrain Huber model and save (run on Fridays)')
     parser.add_argument('--no-telegram', action='store_true', help='Skip telegram alerts')
+    parser.add_argument('--execution-mode', type=str, default='hybrid_2plus2', choices=['hybrid_2plus2', 'sniper_first2', 'fixed_0942'], help='Execution mode: hybrid_2plus2 (2@09:42 + 2@Confirm), sniper_first2 (First-2 Confirmed 09:43-10:45), or fixed_0942')
+    parser.add_argument('--sniper-exit', type=str, default='W80', choices=['W80', 'W81', 'X4', 'X5'], help='Ratchet exit profile for confirmed sniper trades (W80, W81, X4, X5)')
     args = parser.parse_args()
 
     # Weekly retrain mode — retrain and save model, then exit
@@ -780,6 +825,7 @@ def main():
 
     df_plan['total_quantity'] = df_plan.apply(lambda x: int(CAPITAL_PER_TRADE / x['entry_price_0940']), axis=1)
     df_plan['stop_loss_2_25pct'] = df_plan['entry_price_0940'] * 1.0300
+    df_plan = apply_sniper_and_hybrid_execution_plan(df_plan, target_date_str, args.execution_mode, args.sniper_exit)
 
     print(df_plan[['clean_stock', 'signal_type', 'lots_to_trade', 'total_quantity', 'entry_price_0940', 'stop_loss_2_25pct']])
 

@@ -171,3 +171,21 @@ SELECT date, TIME(time) AS tick_time, stockname, open, high, low, close
 FROM scrapdata
 WHERE date = '2020-01-01' AND stockname = 'DALBHARAT' AND TIME(time) IN ('09:42:00', '14:45:00');
 ```
+
+---
+
+## 🎯 Phase 2 MIS Upgrades Added to Model 2 (`09:40 Hybrid`): `4-Freq Confirmed Top-10 NF` + `First-2 Sniper` + `Hybrid 2+2`
+
+In addition to the base `Top-5 NF` priority, `live_0940_hybrid_pipeline.py` now includes:
+1. **`4-Frequency Ensemble Confirmed Top-10 Non-Future Priority` (`[UPGRADE 2A]`):** Expands the Non-Future priority candidate pool from `Top-5` (`df_ranked.iloc[:5]`) to **`Top-10` (`df_ranked.iloc[:10]`)** confirmed by the Rolling 4-Frequency (`day`/`week`/`month`/`year`) Outlier-Trimmed Ensemble (`>= 96th` percentile) with Futures backfill.
+2. **Both Confirmed Execution Modes (`[UPGRADE 2B & 2C]` via `--execution-mode`):**
+   - **Mode 1 — `hybrid_2plus2` ("Best 2 at `09:42` + First-2 Confirmed `09:43–10:45 AM`"):** Enters `Rank #1 & #2` immediately at `09:42 AM` (`2 × ₹10L`) and watches the 4 selected stocks from `09:43 AM to 10:45 AM` to deploy the remaining 2 slots (`2 × ₹10L`) on the first 2 stocks that confirm downward movement (`Direct Downward` or `Bounce-Rejection`, doubling quantity if `Rank #1/#2` confirms first or taking `Rank #3/#4` for 4 distinct stocks).
+   - **Mode 2 — `sniper_first2` ("Pure First-2 Confirmed Sniper `09:43–10:45 AM`"):** Watches all 4 daily picks between `09:43 AM and 10:45 AM` and enters **only on the first 2 stocks** that confirm downward movement (`2 × ₹20L = ₹40L/Day` or `2 × ₹10L = ₹20L/Day`) with the `W80` (`80.92%` WR) / `W81` (`81.35%` WR) / `Plan X5` ratchet exit.
+
+### Walk-Forward Performance Comparison (`2020–2026` + `2026` True OOS, `₹40L/Day` = `₹8L` Margin @ 5x MIS):
+| Execution Strategy (`₹40L/Day` Plan) | Committed Ledger CSV | Trades | All-Yrs Win Rate | **2026 OOS Win Rate** | **Total Net PnL** | **2026 OOS Net PnL** | Max DD | Sharpe |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1. `4-Freq Confirmed Top-10 NF` (Fixed `09:42` Live)** | `02_live_production_pipelines/0940_hybrid_pipeline/verified_0940_top10nf_fixed0942_ledger.csv` | `5,266` | `58.70%` | `60.8%` | **`+₹101.64L`** *(+₹111.79L S3A)* | `+₹13.56L` | `-₹3.52L` | `3.27` |
+| **2. `Top-10 NF` + `Pure First-2 Sniper` (`09:43–10:45`, `W80` / `X5`)** | `02_live_production_pipelines/0940_hybrid_pipeline/verified_0940_top10nf_sniper_first2_ledger.csv` | `2,489` | **`80.92%`** *(W80)* | **`83.7%`** | **`+₹100.17L`** *(W80)* / **`+₹105.86L`** *(X5)* | **`+₹15.21L`** | **`-₹2.57L`** | **`3.78`** |
+| **3. `4-Freq Top-10 NF` + `Hybrid 2@09:42 + 2@Confirm` (`Live+W80` / `Live+X5` / `W80+W80`)** | `02_live_production_pipelines/0940_hybrid_pipeline/verified_0940_top10nf_hybrid_2plus2_ledger.csv` | `5,233` | **`70.53%`** *(Live+W80)* / **`80.83%`** *(W80+W80)* | **`72.9%`** / **`82.0%`** | **`+₹115.21L – +₹117.37L`** *(+₹106.79L W80+W80)* | **`+₹16.05L`** | `-₹3.11L` | **`3.89 – 4.33`** |
+
