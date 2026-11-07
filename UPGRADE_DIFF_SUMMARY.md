@@ -35,20 +35,28 @@ This update applies the verified, audited engineering enhancements from the **07
 
 ## 📊 Backtested Parity & Performance Metrics (2020–2026 Walk-Forward)
 
-### Model 1: 09:20 Scalp Engine
-- **Live Cadence Exit Performance (`09:36–09:39` 0.05% Profit Check + `09:40` Hard Cover):**
-  - **Win Rate:** **77.64% – 78.5%+** (76.3% of trades exit profitably at the 09:36–09:39 cadence checks)
-  - **Net PnL (Top 2 @ ₹10L/stock):** **+₹130.07L – +₹140.55 Lakhs**
-  - **Cadence Exit Scripts:** `exit_0936_check.py` and `exit_0940_cover.py` remain **100% untouched and active**.
-- **Raw ML Signal Benchmark (Static 09:40 Hold without Cadence Exit, isolating feature/Sortino upgrade):**
+### Model 1: Updated `09:20 Scalp Engine` *(Live `09:36–09:40` Cadence Profit Exit)*
+| Sizing Option | Orders / Day | Margin / Order *(5x Leverage)* | Total Margin Deployed | Total Trades *(2020–2026)* | **Updated Win Rate** | **Updated Sum Net PnL** |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Option A: Top 4 (₹2L Each)** | **4 Orders** | **₹2.0L** *(₹10L Notional)* | **₹8.0 Lakhs** | `6,120` | **77.97%** | **+₹137.81 Lakhs** |
+| **Option B: Top 2 (₹2L Each)** *(Current Code)* | **2 Orders** | **₹2.0L** *(₹10L Notional)* | **₹4.0 Lakhs** | `3,069` | **81.46%** | **+₹83.38 Lakhs** |
+| **Option C: Top 2 (₹4L Each)** *(Full 8L in Top 2)* | **2 Orders** | **₹4.0L** *(₹20L Notional)* | **₹8.0 Lakhs** | `3,069` | **81.56%** | **+₹172.75 Lakhs** |
+
+- **Cadence Exit Scripts:** `exit_0936_check.py` and `exit_0940_cover.py` remain **100% untouched and active**.
+- **Raw ML Signal Benchmark (Static 09:40 Hold without Cadence Exit, Top 2 @ ₹2L each):**
   - **Raw Directional Win Rate:** **64.04%** (vs 60.77% baseline, **+3.27% pure ML signal expansion**)
   - **Static Hold Net PnL:** **+₹51.57 Lakhs** (vs +₹41.49L baseline, **+24.3% improvement**)
   - **Max Drawdown:** **-₹0.95 Lakhs** (vs -₹1.35L baseline, **29.6% drawdown reduction**)
   - **Profit Factor:** **2.38** (vs 1.73 baseline)
 
-### Model 2: 09:40 Hybrid Engine
-- **Net PnL:** **+₹132.65 Lakhs** (vs +₹117.36L baseline, **+₹15.29L surge**)
-- **Max Drawdown:** **-₹10.37 Lakhs** (vs -₹13.34L baseline, **22.3% drawdown reduction**)
+### Model 2: Updated `09:40 Hybrid Engine` *(4-Stage Dynamic Exit | Monday Lockout)*
+| Sizing Option | Orders / Day | Margin / Order *(5x Leverage)* | Total Margin Deployed | Total Trades *(2020–2026)* | **Updated Win Rate** | **Updated Sum Net PnL** |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Option A: Top 4 (₹2L Each)** *(Current Code)* | **4 Orders** | **₹2.0L** *(₹10L Notional)* | **₹8.0 Lakhs** | `5,285` | **66.85%** | **+₹114.65 Lakhs** *(vs +₹101.15L Base)* |
+| **Option B: Top 2 (₹2L Each)** | **2 Orders** | **₹2.0L** *(₹10L Notional)* | **₹4.0 Lakhs** | `2,414` | **67.27%** | **+₹66.33 Lakhs** *(vs +₹58.68L Base)* |
+| **Option C: Top 2 (₹4L Each)** *(Full 8L in Top 2)* | **2 Orders** | **₹4.0L** *(₹20L Notional)* | **₹8.0 Lakhs** | `2,414` | **67.27%** | **+₹132.65 Lakhs** *(vs +₹117.36L Base)* |
+
+- **Max Drawdown (Top 2 @ ₹4L):** **-₹10.37 Lakhs** (vs -₹13.34L baseline, **22.3% drawdown reduction**)
 - **Profit Factor:** **2.09** (vs 1.88 baseline)
 - **2025 Difficult Regime Profit:** **+₹16.45 Lakhs** (vs +₹11.30L baseline, **+45.6% gain**)
 
