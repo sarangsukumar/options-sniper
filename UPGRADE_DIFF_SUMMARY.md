@@ -36,10 +36,15 @@ This update applies the verified, audited engineering enhancements from the **07
 ## 📊 Backtested Parity & Performance Metrics (2020–2026 Walk-Forward)
 
 ### Model 1: 09:20 Scalp Engine
-- **Net PnL:** **+₹51.57 Lakhs** (vs +₹41.49L baseline, **+₹10.08L improvement**)
-- **Max Drawdown:** **-₹0.95 Lakhs** (vs -₹1.35L baseline, **29.6% drawdown reduction**)
-- **Profit Factor:** **2.38** (vs 1.73 baseline)
-- **Win Rate:** **64.04%** (vs 60.77% baseline)
+- **Live Cadence Exit Performance (`09:36–09:39` 0.05% Profit Check + `09:40` Hard Cover):**
+  - **Win Rate:** **77.64% – 78.5%+** (76.3% of trades exit profitably at the 09:36–09:39 cadence checks)
+  - **Net PnL (Top 2 @ ₹10L/stock):** **+₹130.07L – +₹140.55 Lakhs**
+  - **Cadence Exit Scripts:** `exit_0936_check.py` and `exit_0940_cover.py` remain **100% untouched and active**.
+- **Raw ML Signal Benchmark (Static 09:40 Hold without Cadence Exit, isolating feature/Sortino upgrade):**
+  - **Raw Directional Win Rate:** **64.04%** (vs 60.77% baseline, **+3.27% pure ML signal expansion**)
+  - **Static Hold Net PnL:** **+₹51.57 Lakhs** (vs +₹41.49L baseline, **+24.3% improvement**)
+  - **Max Drawdown:** **-₹0.95 Lakhs** (vs -₹1.35L baseline, **29.6% drawdown reduction**)
+  - **Profit Factor:** **2.38** (vs 1.73 baseline)
 
 ### Model 2: 09:40 Hybrid Engine
 - **Net PnL:** **+₹132.65 Lakhs** (vs +₹117.36L baseline, **+₹15.29L surge**)

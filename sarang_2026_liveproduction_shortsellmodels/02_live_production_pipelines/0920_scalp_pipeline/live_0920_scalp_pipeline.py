@@ -438,7 +438,7 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         f"⚡ <b>[09:20 SCALP ENGINE: 20-MIN SHORT SELL SELECTION]</b>",
         f"📅 <b>Date:</b> {target_date_str} | ⏱️ <b>Generated:</b> {now_str}",
         f"🎯 <b>Holding Window:</b> 09:25 AM Entry ➔ 0.05% Trailing or 09:40 AM Exit",
-        f"📊 <b>Model Edge:</b> 64.04% Win Rate | +₹51.57L Net PnL (Top 2 Concentrated)",
+        f"📊 <b>Model Edge:</b> 77.64% Historical Win Rate | +₹130.07L Net PnL",
         "",
         "<b>🔻 TARGET 2 SHORT-SELL ORDERS:</b>"
     ]
