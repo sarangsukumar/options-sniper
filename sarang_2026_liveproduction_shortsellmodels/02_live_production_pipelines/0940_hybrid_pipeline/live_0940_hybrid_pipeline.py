@@ -533,8 +533,8 @@ def train_and_predict_single(df_today):
 
     # ===================================================================
     # AUDITED SELECTION & QUALIFIED REPLACEMENTS (Option A)
-    # 1. Evaluate original Top 2 with Cutoff -1.5% (Rule 1) and Crash Protector (Rule 2).
-    # 2. OPTION A CONSTRAINT: Replacements from Rank 3 and Rank 4 are ONLY
+    # 1. Evaluate original Top 4 with Cutoff -1.5% (Rule 1) and Crash Protector (Rule 2).
+    # 2. OPTION A CONSTRAINT: Replacements from Rank 5 and Rank 6 are ONLY
     #    permitted to replace stocks dropped by Rule 1 (stock_pct_940 < -1.5%).
     #    Stocks dropped by Rule 2 (Nifty crash), Rule 3, or Rule 4 remain EMPTY.
     # 3. Maximum replacements allowed = r1_dropped_count (capped by available slots).
@@ -554,9 +554,9 @@ def train_and_predict_single(df_today):
     else:
         active_futs = set()
     df_ranked['in_pit_futures'] = df_ranked['clean_stock'].isin(active_futs)
-    original_top2 = pd.concat([df_ranked.iloc[:5][~df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[:5][df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[5:]], ignore_index=True).head(2).copy()
+    original_top4 = pd.concat([df_ranked.iloc[:5][~df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[:5][df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[5:]], ignore_index=True).head(4).copy()
 
-    print(f"\n   🛡️ APPLYING FILTER RULES TO ORIGINAL TOP 2 CANDIDATES:")
+    print(f"\n   🛡️ APPLYING FILTER RULES TO ORIGINAL TOP 4 CANDIDATES:")
     passed = []
     blocked_list = []
     r1_dropped_count = 0
@@ -569,12 +569,12 @@ def train_and_predict_single(df_today):
     else:
         active_rule_msg = f"🟢 NORMAL DAY (Nifty {nifty_pct:+.2f}%). Standard filters active."
 
-    for idx, row in original_top2.iterrows():
+    for idx, row in original_top4.iterrows():
         ok, reason = apply_rules(row)
         if ok:
             row_dict = row.to_dict()
             row_dict['model_rank'] = idx + 1
-            row_dict['signal_type'] = f"TOP 2 (RANK {idx + 1})"
+            row_dict['signal_type'] = f"TOP 4 (RANK {idx + 1})"
             passed.append(row_dict)
             print(f"      ✅ TRADING  Rank {idx + 1}: {row['clean_stock']:12} | stock%: {row['stock_pct_940']:+.2f}%")
         else:
@@ -589,12 +589,12 @@ def train_and_predict_single(df_today):
             })
             print(f"      ⛔ SKIPPED  Rank {idx + 1}: {row['clean_stock']:12} | stock%: {row['stock_pct_940']:+.2f}% | Reason: {reason}")
 
-    # OPTION A: Qualified Replacements (Ranks 3 & 4) ONLY for Rule 1 drops
-    reps_allowed = min(2 - len(passed), r1_dropped_count)
-    if reps_allowed > 0 and len(df_ranked) > 2:
+    # OPTION A: Qualified Replacements (Ranks 5 & 6) ONLY for Rule 1 drops
+    reps_allowed = min(4 - len(passed), r1_dropped_count)
+    if reps_allowed > 0 and len(df_ranked) > 4:
         print(f"\n   🔄 EVALUATING OPTION A REPLACEMENTS (Rule 1 drops: {r1_dropped_count}, Max Reps Allowed: {reps_allowed}):")
         reps_taken = 0
-        for r_idx in range(2, min(5, len(df_ranked))):
+        for r_idx in range(4, min(6, len(df_ranked))):
             cand = df_ranked.iloc[r_idx]
             spct = cand['stock_pct_940']
             rank_num = r_idx + 1
@@ -621,7 +621,7 @@ def train_and_predict_single(df_today):
             reps_taken += 1
             print(f"      ✅ REPLACEMENT ACCEPTED Rank {rank_num}: {cand['clean_stock']:12} | stock%: {spct:+.2f}% (Rule 1 Replacement)")
             
-            if reps_taken == reps_allowed or len(passed) == 2:
+            if reps_taken == reps_allowed or len(passed) == 4:
                 break
 
     if not passed:
@@ -630,7 +630,7 @@ def train_and_predict_single(df_today):
 
     df_plan = pd.DataFrame(passed).reset_index(drop=True)
     df_plan['lots_to_trade'] = 1
-    print(f"   ✅ Total {len(df_plan)} orders confirmed for execution (Strict Top 2 Concentration).")
+    print(f"   ✅ Total {len(df_plan)} orders confirmed for execution.")
     return df_plan, blocked_list, active_rule_msg
 
 
@@ -669,7 +669,7 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
         lines.append(f"📊 <b>Market Status:</b> {active_rule_msg}")
         lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-    lines.append(f"🎯 <b>MODEL TOP 2 PREDICTIONS</b>  |  ✅ {n_traded} Trading  ⛔ {n_blocked} Skipped")
+    lines.append(f"🎯 <b>MODEL TOP 4 PREDICTIONS</b>  |  ✅ {n_traded} Trading  ⛔ {n_blocked} Skipped")
     lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     # Traded stocks
@@ -678,7 +678,7 @@ def format_telegram_alert(df_plan, target_date_str, blocked_stocks=None, active_
         entry = float(row['entry_price_0940'])
         sl    = entry * 1.0300
         qty   = int(row.get('total_quantity', int(CAPITAL_PER_TRADE / entry)))
-        sig   = row.get('signal_type', 'TOP 2')
+        sig   = row.get('signal_type', 'TOP 4')
         lines.append(f"✅ <b>{stock}</b>  <i>({sig})</i>")
         lines.append(f"  • <b>Action:</b> SHORT SELL {qty} QTY (₹10.0L Notional / ₹2.0L Margin)")
         lines.append(f"  • <b>Entry:</b> ₹{entry:,.2f}  |  <b>Initial SL (3.0%):</b> ₹{sl:,.2f}")
@@ -737,7 +737,7 @@ def main():
         return
 
     print("="*83)
-    print("🚀 LIVE 09:40 AM SHORT SELL MODEL (CERTIFIED 1-LOT TOP 2 SELECTION)")
+    print("🚀 LIVE 09:40 AM SHORT SELL MODEL (CERTIFIED 1-LOT TOP 4 SELECTION)")
     print("="*83)
 
     print(f"1. Fetching live MySQL data for {target_date_str} ({day_name})...")
@@ -775,7 +775,7 @@ def main():
         return
 
     print("\n" + "="*83)
-    print(f"🏆 2-LOT LIVE SHORT SELL PLAN FOR {target_date_str} (TOTAL LOTS: 2 | ENTRY 09:42 AM)")
+    print(f"🏆 4-LOT LIVE SHORT SELL PLAN FOR {target_date_str} (TOTAL LOTS: 4 | ENTRY 09:42 AM)")
     print("="*83)
 
     df_plan['total_quantity'] = df_plan.apply(lambda x: int(CAPITAL_PER_TRADE / x['entry_price_0940']), axis=1)

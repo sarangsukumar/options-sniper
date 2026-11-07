@@ -27,7 +27,7 @@ This update applies the verified, audited engineering enhancements from the **07
 | **Candlestick Denominator Explosions** | Zero / near-zero morning range (`morn_range_pct`) caused 2,048x spikes in `vol_normalized_gap` and 578x in `rejection_wick`. | Applied denominator clamping: `morn_clean = np.clip(abs(morn_range_pct)*100, 0.20, 10.0)` and clamped ratios. | Numerically stable features across all volatility regimes. |
 | **Lookahead Query Leak** | M1 queried `scrapdata` with `<= '09:23:59'`, reading 4 minutes ahead of its 09:20 cutoff. | Restricted SQL query strictly to `<= '09:19:59'`. | 100% point-in-time compliant live execution. |
 | **Foreign API Latency & Freezes** | `yfinance` downloaded `^NSEI`, `^GSPC`, `^N225` on every live run, risking network timeouts at 09:20 / 09:40. | Replaced with pure domestic indicators and fallback constants. | Execution latency dropped from 15s to <2s. Zero foreign API risk. |
-| **Sizing & Trade Concentration** | Inconsistent trade limits (Top 4 vs Top 2) and capital (₹5L/₹6.25L vs ₹10L). | Standardized to **Strict Top 2 candidates** at **₹10,00,000 notional** (`qty = int(10L / CMP)`). | Minimizes transaction fee drag, maximizes edge per trade. |
+| **Sizing & Trade Concentration** | Inconsistent capital (₹5L/₹6.25L vs ₹10L). | Standardized to **₹10,00,000 notional (₹2.0L margin @ 5x MIS) per stock**: **Top 2** for 09:20 (**₹4.0L total margin**) and **Top 4** for 09:40 (**₹8.0L total margin**). | Eliminates transaction fee drag on 09:20 scalp while maintaining full 4-slot diversification on 09:40 hybrid. |
 | **Monday Mean-Reversion Trap** | Model 2 historical baseline suffered -₹19.23L cumulative drawdown on Mondays due to buy-the-dip pressure. | Added strict Monday lockout: `if target_dt.dayofweek == 0 and not args.force_monday: return`. | Completely avoids Monday mean-reversion trap in Model 2. |
 | **Outlier Loss Resilience** | Mean squared error (MSE) penalizes large rebound squeezes excessively during training. | Retrained Model 2 with **Huber Loss (`alpha=1.0`)** and 1.8x downside weight. Retrained Model 1 with **Asymmetric Sortino Loss (2.5x)**. | Model ignores tail rebound squeezes and focuses on high-conviction downside drift. |
 
@@ -65,11 +65,11 @@ This update applies the verified, audited engineering enhancements from the **07
 ### 3. `02_live_production_pipelines/0940_hybrid_pipeline/live_0940_hybrid_pipeline.py`
 - **Features Vector (`PURE_DB_FEATURES`):** 15 features (pruned `dip_zone_flag`, `bear_mom_acceleration`; added `prev_candle_filling`, `sector_gap_dispersion`, `sector_return_dispersion`, `cross_sectional_gap_rank`, `stock_sortino`).
 - **Latency Elimination:** Stripped `yfinance` download block; uses domestic indicators.
-- **Capital Sizing:** `CAPITAL_PER_TRADE = 1000000.0` (₹10.0 Lakhs).
+- **Capital Sizing:** `CAPITAL_PER_TRADE = 1000000.0` (₹10.0 Lakhs Notional / ₹2.0 Lakhs Margin per stock × Top 4 = ₹8.0 Lakhs Total Margin).
 - **Monday Lockout:** Exits on Mondays before database query (`--force-monday` available for testing/override).
-- **Concentration:** Selected Top 2 candidates (`original_top2 = ...head(2).copy()`, max replacement = 2).
+- **Selection:** Preserved Top 4 candidate selection (`original_top4 = ...head(4).copy()`, Option A replacements).
 - **Lotsize File Fallback:** Checks local `config/historical_lotsize_new.csv` with safe fallbacks.
-- **Telegram & Console Alerts:** Updated to display ₹10L budget and Top 2 target cards.
+- **Telegram & Console Alerts:** Updated to display ₹10.0L Notional (₹2.0L Margin) budget across Top 4 target cards.
 
 ### 4. `02_live_production_pipelines/0940_hybrid_pipeline/lgb_0940_rebound_aware_audited_model.txt`
 - LightGBM booster model trained with Huber loss (`alpha=1.0`) and 1.8x downside sample weighting on the 15 features across 265,290 historical ticks.
@@ -83,7 +83,7 @@ This update applies the verified, audited engineering enhancements from the **07
 cd sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline
 python3 live_0920_scalp_pipeline.py --date 2026-08-04 --no-telegram
 ```
-*Expected Result:* Runs in <2.0 seconds, selects Top 2 candidates (`ZEEL`, `ZYDUSLIFE`), sizes ~₹10L each.
+*Expected Result:* Runs in <2.0 seconds, selects Top 2 candidates (`ZEEL`, `ZYDUSLIFE`), sizes ~₹10L Notional (₹2L Margin) each (**₹4L Total Margin**).
 
 ### Model 2 Dry Run:
 ```bash
@@ -95,4 +95,4 @@ python3 live_0940_hybrid_pipeline.py --date 2026-08-04 --no-telegram
 ```
 *Expected Result:*
 - On Monday (`2026-08-03`): Exits immediately with `[MONDAY LOCKOUT ACTIVE]`.
-- On Tuesday (`2026-08-04`): Runs in ~3.8 seconds, selects Top 2 candidates (`TATACHEM`, `INDIAMART`), sizes ~₹10L each.
+- On Tuesday (`2026-08-04`): Runs in ~3.8 seconds, selects Top 4 candidates (`TATACHEM`, `INDIAMART`, `PNB`, `BANDHANBNK`), sizes ~₹10L Notional (₹2L Margin) each (**₹8L Total Margin**).
