@@ -109,3 +109,41 @@ python3 live_0940_hybrid_pipeline.py --date 2026-08-04 --no-telegram
 *Expected Result:*
 - On Monday (`2026-08-03`): Exits immediately with `[MONDAY LOCKOUT ACTIVE]`.
 - On Tuesday (`2026-08-04`): Runs in ~3.8 seconds, selects Top 4 candidates (`TATACHEM`, `INDIAMART`, `PNB`, `BANDHANBNK`), sizes ~₹10L Notional (₹2L Margin) each (**₹8L Total Margin**).
+
+
+---
+
+## 📑 Standardized Database Trade Ledgers & SQL Verification Guide
+
+To allow anyone with MySQL (`markets`) database access to independently verify every trade, fill price, quantity, commission, and net PnL against `scrapdata`, standardized 10-column CSV ledgers have been generated and committed to this branch:
+
+### Standardized 10-Column Schema:
+```text
+date,stockname,qty,entry_time,entry_price,exit_time,exit_price,gross_pnl,commission,net_pnl
+```
+- **`gross_pnl`** = `ROUND((entry_price - exit_price) * qty, 2)`
+- **`net_pnl`** = `ROUND(gross_pnl - commission, 2)`
+- **`qty`** = `INT(1000000 / entry_price)` (`₹10.0L Notional` = `₹2.0L Margin` @ 5x MIS per order)
+
+### Committed Ledger Files:
+| Model & Sizing | File Path in Repository | Rows (Trades) | Win Rate | Verified Sum Net PnL |
+| :--- | :--- | :---: | :---: | :---: |
+| **Model 1 (`09:20 Scalp` — Top 2 @ ₹2L Margin)** | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_scalp_top2_ledger.csv` | `3,069` | **81.46%** | **+₹83.38 Lakhs** |
+| **Model 1 (`09:20 Scalp` — Top 4 @ ₹2L Margin)** | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_scalp_top4_ledger.csv` | `6,120` | **77.97%** | **+₹137.81 Lakhs** |
+| **Model 2 (`09:40 Hybrid` — Top 4 @ ₹2L Margin)** | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0940_hybrid_pipeline/verified_0940_hybrid_top4_ledger.csv` | `5,285` | **55.72% Static** *(66.85% Dyn)* | **+₹101.15L Static** *(+₹114.65L Dyn)* |
+| **Model 2 (`09:40 Hybrid` — Top 2 @ ₹2L Margin)** | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0940_hybrid_pipeline/verified_0940_hybrid_top2_ledger.csv` | `2,668` | **56.26% Static** *(67.27% Dyn)* | **+₹60.11L Static** *(+₹66.33L Dyn)* |
+
+### Quick SQL Verification Queries (`markets.scrapdata`):
+See [`HOW_TO_VERIFY_LEDGER_IN_DB.md`](HOW_TO_VERIFY_LEDGER_IN_DB.md) for the complete step-by-step verification guide.
+
+```sql
+-- Verify Model 1 (09:20 Scalp) Trade: 2020-01-01 AMBUJACEM (Qty=5060, Entry=197.60, Exit=197.10, Gross=2530.00, Comm=300.00, Net=2230.00)
+SELECT date, TIME(time) AS tick_time, stockname, open, high, low, close
+FROM scrapdata
+WHERE date = '2020-01-01' AND stockname = 'AMBUJACEM' AND TIME(time) IN ('09:25:00', '09:36:00');
+
+-- Verify Model 2 (09:40 Hybrid) Trade: 2020-01-01 DALBHARAT (Qty=1235, Entry=809.10, Exit=805.05, Gross=5001.75, Comm=405.30, Net=4596.45)
+SELECT date, TIME(time) AS tick_time, stockname, open, high, low, close
+FROM scrapdata
+WHERE date = '2020-01-01' AND stockname = 'DALBHARAT' AND TIME(time) IN ('09:42:00', '14:45:00');
+```
