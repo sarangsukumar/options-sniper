@@ -25,6 +25,8 @@ All ledger sheets strictly follow the standardized 10-column verification schema
 
 | Model & Sizing Configuration | CSV File Path in Repository | Total Trades | Win Rate | Gross PnL | Commission | **Verified Net PnL** |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Model 1 (`09:20 Daily Rolling 4-Freq`) — Top 2** *(₹4L Margin / ₹20L Notional)* | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_rolling_4freq_top2_ledger_20L.csv` | `3,181` | **81.08%** | `+₹195.26L` | `-₹9.54L` | **`+₹185.72 Lakhs` (+₹1.86 Cr)** |
+| **Model 1 (`09:20 Daily Rolling 4-Freq`) — Top 2** *(₹2L Margin / ₹10L Notional)* | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_rolling_4freq_top2_ledger.csv` | `3,181` | **81.08%** | `+₹97.63L` | `-₹9.54L` | **`+₹88.09 Lakhs`** |
 | **Model 1 (`09:20 Scalp`) — Top 2** *(₹4L Margin / day)* | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_scalp_top2_ledger.csv` | `3,069` | **81.46%** | `+₹92.59L` | `-₹9.21L` | **`+₹83.38 Lakhs`** |
 | **Model 1 (`09:20 Scalp`) — Top 4** *(₹8L Margin / day)* | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_scalp_trade_ledger.csv` | `6,120` | **77.97%** | `+₹156.17L` | `-₹18.36L` | **`+₹137.81 Lakhs`** |
 | **Model 2 (`09:40 Hybrid`) — Top 4** *(₹8L Margin / day)* | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0940_hybrid_pipeline/verified_0940_hybrid_trade_ledger.csv` | `5,285` | **55.72%** *(Static)* / **66.85%** *(4-Stage)* | `+₹122.58L` | `-₹21.48L` | **`+₹101.10 Lakhs`** *(Static)* / **`+₹114.65 Lakhs`** *(4-Stage)* |
