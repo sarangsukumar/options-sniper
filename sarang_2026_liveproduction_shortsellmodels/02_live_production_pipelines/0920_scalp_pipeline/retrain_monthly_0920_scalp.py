@@ -101,6 +101,7 @@ tr_d, p_nb = sorted(df_train['short_date'].unique()), {**params_920, 'objective'
 pickle.dump({k: lgb.train(p_nb, lgb.Dataset(df_train[df_train['short_date'] <= cd][features_920], label=df_train[df_train['short_date'] <= cd]['short_ret']), num_boost_round=60) for k, cd in {'day': tr_d[-1], 'week': tr_d[max(0, len(tr_d)-5)], 'month': tr_d[max(0, len(tr_d)-21)], 'year': tr_d[max(0, len(tr_d)-126)]}.items()}, open(os.path.join(DIR, 'lgb_0920_ens_checkpoints.pkl'), 'wb'))
 # [UPDATE 3] Daily Evening Rolling 4-Frequency Ensemble (day, week, month + half-yearly year anchor) + Downside Sortino Weighting (w=1.5 on losses)
 import numpy as np
+df['short_ret'] = (((df['pnl_net'] / 1000000.0) + 0.0004) * 100.0).fillna(0.0)
 ens_cut = (pd.Timestamp.now(tz='Asia/Kolkata') + pd.Timedelta(days=1 if pd.Timestamp.now(tz='Asia/Kolkata').hour >= 10 else 0)).strftime('%Y-%m-%d')
 df_ens, tr_d = df[df['short_date'] < ens_cut], sorted(df[df['short_date'] < ens_cut]['short_date'].unique())
 pickle.dump({k: lgb.train(p_nb, lgb.Dataset(df_ens[df_ens['short_date'] <= cd][features_920], label=df_ens[df_ens['short_date'] <= cd]['short_ret'], weight=np.where(df_ens[df_ens['short_date'] <= cd]['short_ret'] < 0, 1.5, 1.0)), num_boost_round=60) for k, cd in {'day': tr_d[-1], 'week': tr_d[max(0, len(tr_d)-5)], 'month': ([d for d in tr_d if d < ens_cut[:8] + '01'] or tr_d)[-1], 'year': df_train['short_date'].max()}.items()}, open(os.path.join(DIR, 'lgb_0920_ens_checkpoints.pkl'), 'wb'))

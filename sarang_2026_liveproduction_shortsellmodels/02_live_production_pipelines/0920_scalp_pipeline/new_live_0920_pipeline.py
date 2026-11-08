@@ -173,6 +173,7 @@ def extract_today_features(today_str, prev_date_str):
         today_morn.setdefault(stk, []).append(r)
 
     records = []
+    VALID_STOCKS = sorted(k for k, v in today_morn.items() if any(str(x['time']).split()[-1] >= '09:15:00' for x in v) and float([x['price'] for x in v if str(x['time']).split()[-1] >= '09:15:00'][0]) >= 50)  # [UPDATE] Dynamic morning F&O stocks (open_0915 >= Rs 50)
     for stock in VALID_STOCKS:
         if stock not in today_morn or stock not in pday:
             continue
@@ -267,6 +268,7 @@ def fetch_macro_for_date(today_str, prev_date_str=None):
             df_open = data[['^NSEI']]
 
         # 1. SP500 overnight return: (close[t-1] / close[t-2]) - 1
+        df_close, df_open = df_close[df_close.index.strftime('%Y-%m-%d') <= today_str].assign(**{'^GSPC': df_close['^GSPC'].where(df_close.index.strftime('%Y-%m-%d') < today_str)}), df_open[df_open.index.strftime('%Y-%m-%d') <= today_str]
         sp_close = df_close['^GSPC'].dropna()
         if len(sp_close) >= 2:
             macro['sp500_overnight_ret'] = float((sp_close.iloc[-1] / sp_close.iloc[-2]) - 1)
