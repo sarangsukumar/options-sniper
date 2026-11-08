@@ -357,6 +357,7 @@ def select_top4(df_features, macro, today_str, dry_run=False):
     df_features = df_features.sort_values('prob', ascending=False).reset_index(drop=True)
 
     top4 = df_features.head(4).copy()
+    top4 = df_features.head(2).copy()  # [UPDATE] Concentrate on Top 2 Ranks Only (Rank 1 & Rank 2)
     top4['quantity'] = top4['entry_price'].apply(lambda p: int(500000 / p) if pd.notna(p) and p > 0 else 0)
 
     print("\n🏆 TOP 4 PICKS (09:20 Scalp Verified Model):")
