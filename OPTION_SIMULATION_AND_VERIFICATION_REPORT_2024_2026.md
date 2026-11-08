@@ -107,3 +107,33 @@ All three trade-by-trade verification CSV ledgers are stored in [`option_simulat
 1. [`SIDE_BY_SIDE_2L_CAPITAL_LEDGER_0920_UPGRADED_PR1_2024_2026.csv`](./option_simulation_ledgers/SIDE_BY_SIDE_2L_CAPITAL_LEDGER_0920_UPGRADED_PR1_2024_2026.csv) — `1,000` non-expiry Top-2 trades (`862` captured in Options + `138` missing with side-by-side MIS Equity `₹1L Margin = ₹5L Exposure` & `₹10L Notional` PnL).
 2. [`SIDE_BY_SIDE_2L_CAPITAL_LEDGER_0940_FNO_SNIPER_2024_2026.csv`](./option_simulation_ledgers/SIDE_BY_SIDE_2L_CAPITAL_LEDGER_0940_FNO_SNIPER_2024_2026.csv) — `836` non-expiry Confirmed F&O Sniper trades (`773` captured across `1_ITM_PE` / `ATM_PE` + side-by-side MIS Equity PnL).
 3. [`SIDE_BY_SIDE_2L_RECYCLED_COMBINED_0920_AND_0940_LEDGER_2024_2026.csv`](./option_simulation_ledgers/SIDE_BY_SIDE_2L_RECYCLED_COMBINED_0920_AND_0940_LEDGER_2024_2026.csv) — All `1,836` chronologically ordered recycled-capital trades (`09:20` Session 1 ➔ `09:40` Session 2) on `₹1.0L/stock` (`Max ₹2.0L` total capital).
+
+---
+
+## 🛡️ 6. Institutional QA Guardrails & Production Readiness Addendum
+
+Following the comprehensive independent forensic audit of PR #7, this branch implements critical architectural and financial safeguards:
+
+### 1. Enforced NSE Tick Size Compliance (₹0.05 Rule)
+* **Problem**: 38.4% of Session 1 and 37.6% of Session 2 backtest exits occurred at synthetic decimal prices (e.g. ₹10.72, ₹1.66) violating exchange rules.
+* **Fix**: Implemented `round_to_nse_tick(price, direction='floor')` in `qa_execution_guardrails.py` to guarantee all limit and trailing exits strictly align with NSE ₹0.05 tick boundaries.
+
+### 2. Order Book Liquidity Cap (Max 5 Lots / Trade)
+* **Problem**: Fixed cash-notional allocation generated orders up to 229 lots (57,250 contracts) at 09:25 AM on names where exchange depth is 1–5 lots.
+* **Fix**: Enforced `DEFAULT_MAX_OPTION_LOTS = 5` and `--max-option-lots` parameter in both production pipelines.
+
+### 3. Bid-Ask Spread Friction Guardrail (2-Tick Exchange Reality)
+* **Problem**: Zero spread friction was assumed on single-stock options.
+* **Fix**: Added `apply_bid_ask_spread_friction()` modeling realistic entry at Ask (`CMP + ₹0.05`) and exit at Bid (`CMP - ₹0.05`).
+
+### 4. Elimination of Model Sort Inversion Hazard
+* **Problem**: In `live_0940_hybrid_pipeline.py`, the sort direction was inverted (`ascending=True` vs `ascending=False`) depending on whether `--fno-only-options` was supplied.
+* **Fix**: Unified short conviction scoring (`short_conviction = -pred_return` for raw price delta models, `short_conviction = pred_return` for short profit models). All pipelines now sort strictly with `ascending=False`.
+
+### 5. Dynamic SEBI Cleared Capital Recycling Validation
+* **Problem**: Assumed unconditional ₹2,00,000 available at 09:43 AM every day regardless of Session 1 losses or intraday margin release delays.
+* **Fix**: Added `verify_cleared_recycling_margin()` and `--s1-realized-loss` parameter, reducing Session 2 allocation dynamically if Session 1 suffered a drawdown.
+
+### 6. Safe Option Order Routing (Suppressed Silent MIS Injection)
+* **Problem**: Running `--put-option-mode` or `--fno-only-options` logged option messages but silently inserted Cash MIS Equity short-sell orders into MySQL.
+* **Fix**: Added hard guardrail blocking `insert_shortsell_orders` when option mode is active, safely staging structured option parameters to `options_orders_staging_*.json` for the dedicated option execution daemon.

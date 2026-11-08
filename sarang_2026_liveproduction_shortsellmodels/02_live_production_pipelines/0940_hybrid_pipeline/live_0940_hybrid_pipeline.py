@@ -15,6 +15,12 @@ Key Operational Rules:
 
 import os
 import sys
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 import time
 import argparse
 from datetime import datetime
@@ -31,6 +37,26 @@ try:
     from insert_shortsell_orders import insert_shortsell_orders as _insert_ss_orders
 except ImportError:
     _insert_ss_orders = None
+
+# Institutional QA Execution Guardrails & Compliance
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+COMMON_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, '..', 'common'))
+if COMMON_DIR not in sys.path:
+    sys.path.insert(0, COMMON_DIR)
+try:
+    from qa_execution_guardrails import (
+        round_to_nse_tick,
+        calculate_option_lots,
+        DEFAULT_MAX_OPTION_LOTS,
+        verify_cleared_recycling_margin,
+        stage_option_orders_safely
+    )
+except ImportError:
+    round_to_nse_tick = lambda p, **kw: max(0.05, round(p, 2))
+    calculate_option_lots = lambda c, p, l, max_lots=5: min(int(c / (p * l)), max_lots) if p > 0 and l > 0 else 1
+    DEFAULT_MAX_OPTION_LOTS = 5
+    verify_cleared_recycling_margin = lambda loss=0.0, base=200000.0: max(0.0, base - max(0.0, loss))
+    stage_option_orders_safely = None
 
 warnings.filterwarnings('ignore')
 
@@ -419,7 +445,14 @@ def train_and_predict_single(df_today):
             df_today[f] = 0.0
         df_today[f] = pd.to_numeric(df_today[f], errors='coerce').fillna(0.0)
     df_today['pred_return'] = mod.predict(df_today[PURE_DB_FEATURES])
-    df_ranked = df_today.sort_values('pred_return', ascending=False).reset_index(drop=True)
+    # Institutional Guardrail: Unify short conviction scoring to prevent inverted sort bugs.
+    # lgb_0940_fno_only_rebound_aware_model predicts raw price change (negative = drop).
+    # Standard Huber model predicts short profit percentage (positive = short profit).
+    if os.environ.get('FNO_ONLY_OPTIONS_MODE') == '1':
+        df_today['short_conviction'] = -df_today['pred_return']
+    else:
+        df_today['short_conviction'] = df_today['pred_return']
+    df_ranked = df_today.sort_values('short_conviction', ascending=False).reset_index(drop=True)
 
 
     # =========================================================
@@ -561,14 +594,14 @@ def train_and_predict_single(df_today):
     original_top4 = pd.concat([df_ranked.iloc[:5][~df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[:5][df_ranked.iloc[:5]['in_pit_futures']], df_ranked.iloc[5:]], ignore_index=True).head(4).copy()
     # [UPGRADE 2A] 4-Frequency Ensemble Confirmed Top-10 Non-Future Priority + Futures Backfill
     df_ranked['is_non_future'] = ~df_ranked['in_pit_futures']
-    df_ranked['r_base_pct'] = df_ranked['pred_return'].rank(pct=True)
+    df_ranked['r_base_pct'] = df_ranked['short_conviction'].rank(pct=True)
     df_ranked['ens_4freq_score'] = (0.50 * df_ranked['r_base_pct'] + 0.50 * df_ranked['trim_940'].rank(pct=True)) if 'trim_940' in df_ranked.columns else df_ranked['r_base_pct']
     _top10_pool = df_ranked.iloc[:10].copy()
     _nf_confirmed_10 = _top10_pool[_top10_pool['is_non_future'] & (_top10_pool['ens_4freq_score'] >= 0.96)]
     _others_10 = _top10_pool.drop(_nf_confirmed_10.index)
     df_ranked = pd.concat([_nf_confirmed_10, _others_10, df_ranked.iloc[10:].copy()], ignore_index=True)
     if os.environ.get('FNO_ONLY_OPTIONS_MODE') == '1':
-        df_ranked = df_ranked[df_ranked['in_pit_futures']].sort_values('pred_return', ascending=True).reset_index(drop=True)
+        df_ranked = df_ranked[df_ranked['in_pit_futures']].sort_values('short_conviction', ascending=False).reset_index(drop=True)
         print(f"   🎯 [EXCLUSIVE F&O OPTION MODE] Filtered to {len(df_ranked)} Point-in-Time F&O stocks (100% Put Option availability).")
     original_top4 = df_ranked.head(4).copy()
 
@@ -760,12 +793,15 @@ def apply_sniper_and_hybrid_execution_plan(df_plan, target_date_str, execution_m
         ]
         print(f"   🔥 [HYBRID 2+2 MODE ACTIVE] Best 2 (Rank #1 & #2) enter @ 09:42 AM + Remaining 2 slots on First-2 Confirmations (09:43-10:45 AM | {sniper_exit}).")
     if os.environ.get('FNO_ONLY_OPTIONS_MODE') == '1':
-        df_out['put_option_capital_per_stock'] = 100000
-        df_out['put_option_max_daily_capital'] = 200000
+        s1_loss = float(os.environ.get('SESSION1_REALIZED_LOSS', '0.0'))
+        recycled_cap = verify_cleared_recycling_margin(session1_realized_loss=s1_loss, base_capital=200000.0)
+        df_out['put_option_capital_per_stock'] = recycled_cap / 2.0
+        df_out['put_option_max_daily_capital'] = recycled_cap
         df_out['put_option_strike_role'] = '1_ITM_PE_OR_ATM_PE'
         df_out['put_option_exit_policy'] = os.environ.get('PUT_OPTION_POLICY_0940', 'Sync_Hybrid_B_MaxPnL')
         df_out['put_option_expiry_skip_days'] = 4
-        print(f"   🔥 [09:40 PUT OPTION SNIPER MODE] First-2 Confirmed (09:43-10:45 AM) | ₹1.0L/Stock (Max ₹2.0L/Day) | Strike: 1_ITM_PE/ATM_PE | Exit: {df_out['put_option_exit_policy'].iloc[0]} | Skip <=4d to Expiry")
+        df_out['put_option_max_lots'] = int(os.environ.get('MAX_OPTION_LOTS', DEFAULT_MAX_OPTION_LOTS))
+        print(f"   🔥 [09:40 PUT OPTION SNIPER MODE] First-2 Confirmed (09:43-10:45 AM) | ₹{recycled_cap/200000.0*1.0:.2f}L/Stock (Max ₹{recycled_cap/100000.0:.2f}L/Day net of S1 Loss ₹{s1_loss:,.0f}) | Strike: 1_ITM_PE/ATM_PE | Exit: {df_out['put_option_exit_policy'].iloc[0]} | Skip <=4d to Expiry | Max Lots: {df_out['put_option_max_lots'].iloc[0]}")
     return df_out
 
 def main():
@@ -778,10 +814,14 @@ def main():
     parser.add_argument('--sniper-exit', type=str, default='W80', choices=['W80', 'W81', 'X4', 'X5'], help='Ratchet exit profile for confirmed sniper trades (W80, W81, X4, X5)')
     parser.add_argument('--fno-only-options', action='store_true', help='Enable Exclusive F&O-Only Put Option Buying mode (First-2 Confirmed Sniper 09:43-10:45 AM, ₹1L/stock, Max ₹2L/day, skip <=4d to expiry)')
     parser.add_argument('--put-option-policy', type=str, default='Sync_Hybrid_B_MaxPnL', choices=['Sync_Hybrid_B_MaxPnL', 'Sync_Hybrid_A_WR85', 'OPT_W83_SweetSpot', 'OPT_W90_UltraFast', 'ExactSync_W80'], help='Put Option exit strategy for 09:40 F&O Confirmed Sniper')
+    parser.add_argument('--max-option-lots', type=int, default=DEFAULT_MAX_OPTION_LOTS, help='Maximum discrete lots per option trade to prevent liquidity trap')
+    parser.add_argument('--s1-realized-loss', type=float, default=0.0, help='Realized loss from Session 1 (09:20) in ₹ to verify cleared SEBI margin for Session 2')
     args = parser.parse_args()
     if args.fno_only_options:
         os.environ['FNO_ONLY_OPTIONS_MODE'] = '1'
         os.environ['PUT_OPTION_POLICY_0940'] = args.put_option_policy
+        os.environ['MAX_OPTION_LOTS'] = str(args.max_option_lots)
+        os.environ['SESSION1_REALIZED_LOSS'] = str(args.s1_realized_loss)
         args.execution_mode = 'sniper_first2'
 
     # Weekly retrain mode — retrain and save model, then exit
@@ -858,11 +898,21 @@ def main():
     append_to_daily_ledger(target_date_str, df_plan)
 
     # Insert into shortsell_orders table for automated Kotak MIS order placement
-    print(f"\n📋 Inserting into shortsell_orders for Kotak MIS automation...")
-    if _insert_ss_orders:
-        _insert_ss_orders(df_plan, model_name='0942_HYBRID', trade_date=target_date_str, blocked_stocks=blocked_stocks)
+    is_fno_option_mode = (os.environ.get('FNO_ONLY_OPTIONS_MODE') == '1')
+    if is_fno_option_mode:
+        print(f"\n🛡️ [QA GUARDRAIL ACTIVE] FNO_ONLY_OPTIONS_MODE is enabled:")
+        print(f"   🚫 Suppressed silent insertion into Cash MIS Equity table (`shortsell_orders`).")
+        if stage_option_orders_safely:
+            staging_path = stage_option_orders_safely(df_plan, model_name='0940_SNIPER_PE', trade_date=target_date_str, output_dir=SCRIPT_DIR)
+            print(f"   ✅ Staged option orders safely to: {staging_path}")
+        else:
+            print(f"   ℹ️ Option staging ready in {PRED_CSV} for options execution daemon.")
     else:
-        print("  ⚠️  insert_shortsell_orders not available — skipping DB insert")
+        print(f"\n📋 Inserting into shortsell_orders for Kotak MIS automation...")
+        if _insert_ss_orders:
+            _insert_ss_orders(df_plan, model_name='0942_HYBRID', trade_date=target_date_str, blocked_stocks=blocked_stocks)
+        else:
+            print("  ⚠️  insert_shortsell_orders not available — skipping DB insert")
 
     print("\n3. Formatting and sending Telegram Bot Alert...")
     msg = format_telegram_alert(df_plan, target_date_str, blocked_stocks, active_rule_msg)
