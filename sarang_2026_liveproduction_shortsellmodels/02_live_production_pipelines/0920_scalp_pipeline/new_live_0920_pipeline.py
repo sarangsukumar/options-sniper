@@ -228,14 +228,14 @@ def extract_today_features(today_str, prev_date_str):
 
         records.append({
             'clean_stock'                : stock,
-            'morn_range_pct'             : morn_range_pct,
-            'rejection_wick'             : rejection_wick,
-            'positive_arc_ratio'         : pos_arc_ratio,
-            'Gap_Pct'                    : Gap_Pct,
-            'gap_0907_pct'               : gap_0907_pct,
-            'prev_intraday_vwap_gap'     : prev_intraday_vwap_gap,
-            'prev_intraday_roc_last_hour': prev_intraday_roc_last_hour,
-            'prev_intraday_return'       : prev_intraday_return,
+            'morn_range_pct'             : round(morn_range_pct, 8),
+            'rejection_wick'             : round(rejection_wick, 8),
+            'positive_arc_ratio'         : round(pos_arc_ratio, 6),
+            'Gap_Pct'                    : round(Gap_Pct, 6),
+            'gap_0907_pct'               : round(gap_0907_pct, 6),
+            'prev_intraday_vwap_gap'     : round(prev_intraday_vwap_gap, 6),
+            'prev_intraday_roc_last_hour': round(prev_intraday_roc_last_hour, 6),
+            'prev_intraday_return'       : round(prev_intraday_return, 6),
             'entry_price'                : open_0915,   # approximate; replaced by 09:25 fill price live
         })
 
@@ -274,14 +274,14 @@ def fetch_macro_for_date(today_str, prev_date_str=None):
             df_open = data[['^NSEI']]
 
         # 1. SP500 overnight return: (close[t-1] / close[t-2]) - 1
-        df_close, df_open = df_close[df_close.index.strftime('%Y-%m-%d') <= today_str].assign(**{'^GSPC': df_close['^GSPC'].where(df_close.index.strftime('%Y-%m-%d') < today_str)}), df_open[df_open.index.strftime('%Y-%m-%d') <= today_str]
-        sp_close = df_close['^GSPC'].dropna()
+        df_close, df_open = df_close.reindex(pd.date_range(end=today_str, periods=15, freq='B')), df_open.reindex(pd.date_range(end=today_str, periods=15, freq='B'))
+        sp_close = df_close['^GSPC'].iloc[:-1]
         if len(sp_close) >= 2:
             macro['sp500_overnight_ret'] = float((sp_close.iloc[-1] / sp_close.iloc[-2]) - 1)
 
         # 2. Nikkei gap: (open[t] / close[t-1]) - 1
-        nikkei_open = df_open['^N225'].dropna()
-        nikkei_close = df_close['^N225'].dropna()
+        nikkei_open = df_open['^N225']
+        nikkei_close = df_close['^N225']
         if len(nikkei_open) > 0 and len(nikkei_close) >= 2:
             macro['nikkei_gap'] = float((nikkei_open.iloc[-1] / nikkei_close.iloc[-2]) - 1)
 
@@ -322,12 +322,12 @@ def fetch_macro_for_date(today_str, prev_date_str=None):
         else:
             macro['nifty_gap'] = 0.0
 
-        macro['nifty_vs_sp500_gap'] = macro['nifty_gap'] - macro['sp500_overnight_ret']
-        macro['nifty_vs_nikkei_gap'] = macro['nifty_gap'] - macro['nikkei_gap']
-
         for k in macro:
             if np.isnan(macro[k]):
                 macro[k] = 0.0
+
+        macro['nifty_vs_sp500_gap'] = macro['nifty_gap'] - macro['sp500_overnight_ret']
+        macro['nifty_vs_nikkei_gap'] = macro['nifty_gap'] - macro['nikkei_gap']
 
         print(f"   ✅ Global Macro Features: {macro}")
     except Exception as e:
@@ -337,11 +337,11 @@ def fetch_macro_for_date(today_str, prev_date_str=None):
 
 
 # ─── Step 3: Load Pre-Trained Model & Score → Top 2 ─────────────────────────────
-def select_top4(df_features, macro, today_str, dry_run=False, notional=1000000.0):
+def select_top4(df_features, macro, today_str, dry_run=False, notional=750000.0):
     """
     Load pre-trained production model weights (lgb_0920_scalp_model.txt)
     and score candidate stocks using the exact 13 features.
-    Sizing: int(notional / entry_price), defaulting to ₹10L (₹2L margin @ 5x MIS).
+    Sizing: int(notional / entry_price), defaulting to ₹7.5L (₹1.5L margin @ 5x MIS).
     """
     if not os.path.exists(MODEL_FILE):
         print(f"   ❌ Pre-trained model file not found: {MODEL_FILE}")
@@ -369,8 +369,8 @@ def select_top4(df_features, macro, today_str, dry_run=False, notional=1000000.0
     top2 = df_features.head(2).copy()
     top2['quantity'] = top2['entry_price'].apply(lambda p: int(notional / p) if pd.notna(p) and p > 0 else 0)
 
-    print(f"\n🏆 TOP 2 PICKS (09:20 Scalp Verified Rolling 4-Freq Model | ₹{notional/100000.0:.0f}L Notional):")
-    print(f"{'Rank':<6} {'Stock':<16} {'Prob':<10} {'Entry~':<12} {f'Qty (₹{notional/100000.0:.0f}L)':<14}")
+    print(f"\n🏆 TOP 2 PICKS (09:20 Scalp Verified Rolling 4-Freq Model | ₹{notional/100000.0:g}L Notional):")
+    print(f"{'Rank':<6} {'Stock':<16} {'Prob':<10} {'Entry~':<12} {f'Qty (₹{notional/100000.0:g}L)':<14}")
     print("-" * 60)
     for i, row in top2.iterrows():
         rank = i + 1
@@ -664,13 +664,13 @@ def main():
     parser.add_argument('--date',       default=None, help='Override today date YYYY-MM-DD (for dry-run)')
     parser.add_argument('--dry-run',    action='store_true', help='Predict only, no live orders or monitoring')
     parser.add_argument('--reconcile',  action='store_true', help='Run only reconcile phase (after market close)')
-    parser.add_argument('--notional',   type=float, default=1000000.0, help='Notional capital per trade in ₹ (default 1000000 = ₹10L, use 2000000 for ₹20L)')
+    parser.add_argument('--notional',   type=float, default=750000.0, help='Notional capital per trade in ₹ (default 750000 = ₹7.5L, use 2000000 for ₹20L)')
     args = parser.parse_args()
 
     import pytz
     today_str = args.date or datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
     print("=" * 80)
-    print(f"🚀 NEW 0920 SCALP PIPELINE | {today_str} | Notional=₹{args.notional/100000.0:.0f}L | dry_run={args.dry_run}")
+    print(f"🚀 NEW 0920 SCALP PIPELINE | {today_str} | Notional=₹{args.notional/100000.0:g}L | dry_run={args.dry_run}")
     print("=" * 80)
 
     # ── Find previous trading day ──────────────────────────────────────────────
