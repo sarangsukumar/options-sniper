@@ -27,6 +27,12 @@
 
 import os
 import sys
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 import time
 import json, pickle
 import subprocess
@@ -328,11 +334,12 @@ def fetch_macro_for_date(today_str, prev_date_str=None):
     return macro
 
 
-# ─── Step 3: Load Pre-Trained Model & Score → Top 4 ─────────────────────────────
-def select_top4(df_features, macro, today_str, dry_run=False):
+# ─── Step 3: Load Pre-Trained Model & Score → Top 2 ─────────────────────────────
+def select_top4(df_features, macro, today_str, dry_run=False, notional=1000000.0):
     """
     Load pre-trained production model weights (lgb_0920_scalp_model.txt)
     and score candidate stocks using the exact 13 features.
+    Sizing: int(notional / entry_price), defaulting to ₹10L (₹2L margin @ 5x MIS).
     """
     if not os.path.exists(MODEL_FILE):
         print(f"   ❌ Pre-trained model file not found: {MODEL_FILE}")
@@ -356,18 +363,18 @@ def select_top4(df_features, macro, today_str, dry_run=False):
     df_features['prob'] = 0.50 * pd.Series(model.predict(df_features[FEATURES_920])).rank(pct=True) + 0.50 * pd.Series((s_probs[:, 1] + s_probs[:, 2]) / 2.0).rank(pct=True)
     df_features = df_features.sort_values('prob', ascending=False).reset_index(drop=True)
 
-    top4 = df_features.head(4).copy()
-    top4 = df_features.head(2).copy()  # [UPDATE] Concentrate on Top 2 Ranks Only (Rank 1 & Rank 2)
-    top4['quantity'] = top4['entry_price'].apply(lambda p: int(500000 / p) if pd.notna(p) and p > 0 else 0)
+    # Select Top 2 Ranks Only (Rank 1 & Rank 2)
+    top2 = df_features.head(2).copy()
+    top2['quantity'] = top2['entry_price'].apply(lambda p: int(notional / p) if pd.notna(p) and p > 0 else 0)
 
-    print("\n🏆 TOP 4 PICKS (09:20 Scalp Verified Model):")
-    print(f"{'Rank':<6} {'Stock':<16} {'Prob':<10} {'Entry~':<12} {'Qty (₹5L)':<12}")
-    print("-" * 58)
-    for i, row in top4.iterrows():
+    print(f"\n🏆 TOP 2 PICKS (09:20 Scalp Verified Rolling 4-Freq Model | ₹{notional/100000.0:.0f}L Notional):")
+    print(f"{'Rank':<6} {'Stock':<16} {'Prob':<10} {'Entry~':<12} {f'Qty (₹{notional/100000.0:.0f}L)':<14}")
+    print("-" * 60)
+    for i, row in top2.iterrows():
         rank = i + 1
-        print(f"  {rank:<5} {row['clean_stock']:<16} {row['prob']:<10.4f} ₹{row.get('entry_price', 0):<11.2f} {row.get('quantity', 0):<12}")
+        print(f"  {rank:<5} {row['clean_stock']:<16} {row['prob']:<10.4f} ₹{row.get('entry_price', 0):<11.2f} {row.get('quantity', 0):<14}")
 
-    return top4
+    return top2
 
 
 # ─── Step 4: Live intraday exit monitor ──────────────────────────────────────────
@@ -655,12 +662,13 @@ def main():
     parser.add_argument('--date',       default=None, help='Override today date YYYY-MM-DD (for dry-run)')
     parser.add_argument('--dry-run',    action='store_true', help='Predict only, no live orders or monitoring')
     parser.add_argument('--reconcile',  action='store_true', help='Run only reconcile phase (after market close)')
+    parser.add_argument('--notional',   type=float, default=1000000.0, help='Notional capital per trade in ₹ (default 1000000 = ₹10L, use 2000000 for ₹20L)')
     args = parser.parse_args()
 
     import pytz
     today_str = args.date or datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
     print("=" * 80)
-    print(f"🚀 NEW 0920 SCALP PIPELINE | {today_str} | dry_run={args.dry_run}")
+    print(f"🚀 NEW 0920 SCALP PIPELINE | {today_str} | Notional=₹{args.notional/100000.0:.0f}L | dry_run={args.dry_run}")
     print("=" * 80)
 
     # ── Find previous trading day ──────────────────────────────────────────────
@@ -698,8 +706,8 @@ def main():
     # 2. Macro features
     macro = fetch_macro_for_date(today_str, prev_date_str)
 
-    # 3. Score and select Top 4
-    top4 = select_top4(df_features, macro, today_str, dry_run=args.dry_run)
+    # 3. Score and select Top 2
+    top4 = select_top4(df_features, macro, today_str, dry_run=args.dry_run, notional=args.notional)
     if top4.empty:
         print("❌ No stocks scored. Check model and features.")
         sys.exit(1)
