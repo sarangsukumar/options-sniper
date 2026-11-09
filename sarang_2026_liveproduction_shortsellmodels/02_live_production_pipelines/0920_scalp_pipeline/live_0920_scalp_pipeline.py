@@ -218,7 +218,7 @@ def retrain_and_save_model():
     return mod
 
 
-def run_scalp_pipeline(target_date_str=None, no_telegram=False, notional=1000000.0, use_rolling_ensemble=False):
+def run_scalp_pipeline(target_date_str=None, no_telegram=False, notional=750000.0, use_rolling_ensemble=False):
     start_time = datetime.now()
     print("=" * 75)
     print("⚡ 09:20 - 09:40 SCALP PREDICTION ENGINE (SESSION 1)")
@@ -381,7 +381,9 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False, notional=1000000
         if close_0919 < 50:
             continue
         
-        lotsize = int(notional / close_0919)
+        target_margin = 125000.0 if (700000.0 <= notional <= 800000.0) else (200000.0 if (950000.0 <= notional <= 1050000.0) else (400000.0 if (1900000.0 <= notional <= 2100000.0) else round(notional / 5.0, 2)))
+        effective_notional = target_margin * 5.0
+        lotsize = int(effective_notional / close_0919)
 
         processed_records.append({
             'stockname': stock,
@@ -490,7 +492,7 @@ if __name__ == '__main__':
     parser.add_argument('--date', type=str, default=None, help="Target Date YYYY-MM-DD (defaults to latest in DB)")
     parser.add_argument('--no-telegram', action='store_true', help="Skip sending Telegram alert")
     parser.add_argument('--retrain', action='store_true', help="Retrain model and exit (weekly cron)")
-    parser.add_argument('--notional', type=float, default=1000000.0, help="Notional capital per trade in ₹ (default 1000000 = ₹10L, use 2000000 for ₹20L)")
+    parser.add_argument('--notional', type=float, default=750000.0, help="Notional capital tier per trade in ₹ (default 750000 = ₹7.5L tier -> ₹1.25L cash margin, supports 1000000 -> ₹2L, 2000000 -> ₹4L)")
     parser.add_argument('--use-rolling-ensemble', action='store_true', help="Score candidates with 4-checkpoint daily rolling ensemble (lgb_0920_ens_checkpoints.pkl)")
     args = parser.parse_args()
 
