@@ -27,6 +27,12 @@
 
 import os
 import sys
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 import time
 import json, pickle
 import subprocess
@@ -150,11 +156,11 @@ def extract_today_features(today_str, prev_date_str):
     """)
     prev_rows = cur.fetchall()
 
-    # Today morning ticks (09:07 - 09:19)
+    # Today morning ticks (09:07 - 09:20)
     cur.execute(f"""
         SELECT stockname, time, price FROM scrapdata
         WHERE date = '{today_str}'
-          AND TIME(time) >= '09:07:00' AND TIME(time) <= '09:19:59'
+          AND TIME(time) >= '09:07:00' AND TIME(time) <= '09:20:59'
         ORDER BY stockname, time ASC
     """)
     morn_rows = cur.fetchall()
@@ -173,6 +179,7 @@ def extract_today_features(today_str, prev_date_str):
         today_morn.setdefault(stk, []).append(r)
 
     records = []
+    VALID_STOCKS = sorted(today_morn.keys())  # [UPDATE] Extract all dynamic morning F&O stocks (filtered by active_futs in select_top4)
     for stock in VALID_STOCKS:
         if stock not in today_morn or stock not in pday:
             continue
@@ -202,13 +209,15 @@ def extract_today_features(today_str, prev_date_str):
         # Morning ticks
         mticks = today_morn[stock]
         p_0907_ticks = [float(x['price']) for x in mticks if str(x['time']).split()[-1] < '09:15:00']
-        morn_15_19   = [x for x in mticks if str(x['time']).split()[-1] >= '09:15:00']
+        morn_15_19   = [x for x in mticks if '09:15:00' <= str(x['time']).split()[-1] <= '09:19:59']
+        ticks_0920   = [float(x['price']) for x in mticks if str(x['time']).split()[-1] >= '09:20:00']
         if not morn_15_19:
             continue
 
         p_0915_ticks = [float(x['price']) for x in morn_15_19]
         open_0915  = p_0915_ticks[0]
         close_0919 = p_0915_ticks[-1]
+        open_0920  = ticks_0920[0] if ticks_0920 else close_0919
         high_0919  = max(p_0915_ticks)
         low_0919   = min(p_0915_ticks)
 
@@ -221,15 +230,16 @@ def extract_today_features(today_str, prev_date_str):
 
         records.append({
             'clean_stock'                : stock,
-            'morn_range_pct'             : morn_range_pct,
-            'rejection_wick'             : rejection_wick,
-            'positive_arc_ratio'         : pos_arc_ratio,
-            'Gap_Pct'                    : Gap_Pct,
-            'gap_0907_pct'               : gap_0907_pct,
-            'prev_intraday_vwap_gap'     : prev_intraday_vwap_gap,
-            'prev_intraday_roc_last_hour': prev_intraday_roc_last_hour,
-            'prev_intraday_return'       : prev_intraday_return,
+            'morn_range_pct'             : round(morn_range_pct, 8),
+            'rejection_wick'             : round(rejection_wick, 8),
+            'positive_arc_ratio'         : round(pos_arc_ratio, 6),
+            'Gap_Pct'                    : round(Gap_Pct, 6),
+            'gap_0907_pct'               : round(gap_0907_pct, 6),
+            'prev_intraday_vwap_gap'     : round(prev_intraday_vwap_gap, 6),
+            'prev_intraday_roc_last_hour': round(prev_intraday_roc_last_hour, 6),
+            'prev_intraday_return'       : round(prev_intraday_return, 6),
             'entry_price'                : open_0915,   # approximate; replaced by 09:25 fill price live
+            'open_0920'                  : open_0920,
         })
 
     df = pd.DataFrame(records)
@@ -267,13 +277,14 @@ def fetch_macro_for_date(today_str, prev_date_str=None):
             df_open = data[['^NSEI']]
 
         # 1. SP500 overnight return: (close[t-1] / close[t-2]) - 1
-        sp_close = df_close['^GSPC'].dropna()
+        df_close, df_open = df_close.reindex(pd.date_range(end=today_str, periods=15, freq='B')), df_open.reindex(pd.date_range(end=today_str, periods=15, freq='B'))
+        sp_close = df_close['^GSPC'].iloc[:-1]
         if len(sp_close) >= 2:
             macro['sp500_overnight_ret'] = float((sp_close.iloc[-1] / sp_close.iloc[-2]) - 1)
 
         # 2. Nikkei gap: (open[t] / close[t-1]) - 1
-        nikkei_open = df_open['^N225'].dropna()
-        nikkei_close = df_close['^N225'].dropna()
+        nikkei_open = df_open['^N225']
+        nikkei_close = df_close['^N225']
         if len(nikkei_open) > 0 and len(nikkei_close) >= 2:
             macro['nikkei_gap'] = float((nikkei_open.iloc[-1] / nikkei_close.iloc[-2]) - 1)
 
@@ -314,12 +325,12 @@ def fetch_macro_for_date(today_str, prev_date_str=None):
         else:
             macro['nifty_gap'] = 0.0
 
-        macro['nifty_vs_sp500_gap'] = macro['nifty_gap'] - macro['sp500_overnight_ret']
-        macro['nifty_vs_nikkei_gap'] = macro['nifty_gap'] - macro['nikkei_gap']
-
         for k in macro:
             if np.isnan(macro[k]):
                 macro[k] = 0.0
+
+        macro['nifty_vs_sp500_gap'] = macro['nifty_gap'] - macro['sp500_overnight_ret']
+        macro['nifty_vs_nikkei_gap'] = macro['nifty_gap'] - macro['nikkei_gap']
 
         print(f"   ✅ Global Macro Features: {macro}")
     except Exception as e:
@@ -328,11 +339,12 @@ def fetch_macro_for_date(today_str, prev_date_str=None):
     return macro
 
 
-# ─── Step 3: Load Pre-Trained Model & Score → Top 4 ─────────────────────────────
-def select_top4(df_features, macro, today_str, dry_run=False):
+# ─── Step 3: Load Pre-Trained Model & Score → Top 2 ─────────────────────────────
+def select_top4(df_features, macro, today_str, dry_run=False, notional=750000.0):
     """
     Load pre-trained production model weights (lgb_0920_scalp_model.txt)
     and score candidate stocks using the exact 13 features.
+    Sizing: int(notional / entry_price), defaulting to ₹7.5L (₹1.5L margin @ 5x MIS).
     """
     if not os.path.exists(MODEL_FILE):
         print(f"   ❌ Pre-trained model file not found: {MODEL_FILE}")
@@ -351,22 +363,37 @@ def select_top4(df_features, macro, today_str, dry_run=False):
     df_lots = pd.read_csv(os.path.join(SCRIPT_DIR, 'data', 'historical_lotsize_new.csv'), low_memory=False)
     df_lots['ym'], ym = pd.to_datetime(df_lots['expdate'], format='%d/%m/%Y', errors='coerce').dt.to_period('M'), pd.to_datetime(today_str).to_period('M')
     active_futs = set(df_lots[(df_lots['ym'] >= ym) & (df_lots['ym'] <= ym + 2)]['stockname'].str.strip().str.upper()) or set(df_lots[df_lots['ym'] >= df_lots['ym'].max() - 1]['stockname'].str.strip().str.upper())
-    df_features, ens_mods = df_features[df_features['clean_stock'].isin(active_futs)].copy().reset_index(drop=True), pickle.load(open(os.path.join(MODEL_DIR, 'lgb_0920_ens_checkpoints.pkl'), 'rb'))
+    df_features, ens_mods = df_features[df_features['clean_stock'].isin(active_futs) & (df_features['entry_price'] >= 50)].copy().reset_index(drop=True), pickle.load(open(os.path.join(MODEL_DIR, 'lgb_0920_ens_checkpoints.pkl'), 'rb'))
     s_probs = np.sort(np.vstack([ens_mods[k].predict(df_features[FEATURES_920]) for k in ['day', 'week', 'month', 'year']]).T, axis=1)
     df_features['prob'] = 0.50 * pd.Series(model.predict(df_features[FEATURES_920])).rank(pct=True) + 0.50 * pd.Series((s_probs[:, 1] + s_probs[:, 2]) / 2.0).rank(pct=True)
     df_features = df_features.sort_values('prob', ascending=False).reset_index(drop=True)
 
-    top4 = df_features.head(4).copy()
-    top4['quantity'] = top4['entry_price'].apply(lambda p: int(500000 / p) if pd.notna(p) and p > 0 else 0)
+    # Map input notional tier to intended actual margin & base notional (5x leverage)
+    # 7.5L input -> ₹1.25L actual margin (₹6.25L base notional @ 5x)
+    # 10L input  -> ₹2.00L actual margin (₹10.0L base notional @ 5x)
+    # 20L input  -> ₹4.00L actual margin (₹20.0L base notional @ 5x)
+    if 700000.0 <= notional <= 800000.0:
+        target_margin = 125000.0
+    elif 950000.0 <= notional <= 1050000.0:
+        target_margin = 200000.0
+    elif 1900000.0 <= notional <= 2100000.0:
+        target_margin = 400000.0
+    else:
+        target_margin = round(notional / 5.0, 2)
+    effective_notional = target_margin * 5.0
 
-    print("\n🏆 TOP 4 PICKS (09:20 Scalp Verified Model):")
-    print(f"{'Rank':<6} {'Stock':<16} {'Prob':<10} {'Entry~':<12} {'Qty (₹5L)':<12}")
-    print("-" * 58)
-    for i, row in top4.iterrows():
+    # Select Top 2 Ranks Only (Rank 1 & Rank 2)
+    top2 = df_features.head(2).copy()
+    top2['quantity'] = top2['entry_price'].apply(lambda p: int(effective_notional / p) if pd.notna(p) and p > 0 else 0)
+
+    print(f"\n🏆 TOP 2 PICKS (09:20 Scalp Verified Rolling 4-Freq Model | Input=₹{notional/100000.0:g}L -> Margin=₹{target_margin/100000.0:g}L @ 5x):")
+    print(f"{'Rank':<6} {'Stock':<16} {'Prob':<10} {'Entry~':<12} {f'Qty (₹{target_margin/100000.0:g}L Mrgn)':<18}")
+    print("-" * 64)
+    for i, row in top2.iterrows():
         rank = i + 1
-        print(f"  {rank:<5} {row['clean_stock']:<16} {row['prob']:<10.4f} ₹{row.get('entry_price', 0):<11.2f} {row.get('quantity', 0):<12}")
+        print(f"  {rank:<5} {row['clean_stock']:<16} {row['prob']:<10.4f} ₹{row.get('entry_price', 0):<11.2f} {row.get('quantity', 0):<14}")
 
-    return top4
+    return top2
 
 
 # ─── Step 4: Live intraday exit monitor ──────────────────────────────────────────
@@ -505,11 +532,14 @@ def monitor_exits(top4, today_str, dry_run=False):
 
 
 # ─── Step 5: Save predictions + reconcile to ledger ──────────────────────────────
-def save_predictions(top4, today_str):
+def save_predictions(top4, today_str, dry_run=False):
     top4_save = top4[['clean_stock', 'prob']].copy()
     top4_save.insert(0, 'short_date', today_str)
-    top4_save.to_csv(PRED_TODAY, index=False)
-    print(f"\n💾 Predictions saved to {PRED_TODAY}")
+    if not dry_run:
+        top4_save.to_csv(PRED_TODAY, index=False)
+        print(f"\n💾 Predictions saved to {PRED_TODAY}")
+    else:
+        print(f"\n[DRY RUN] Skipping overwrite of {PRED_TODAY}")
     
     return top4_save
 
@@ -592,17 +622,18 @@ def reconcile_to_ledger(top4, exit_results, today_str):
 
 
 # ─── Step 6: Telegram notification ────────────────────────────────────────────────
-def notify_predictions(top4, today_str, dry_run=False):
+def notify_predictions(top4, today_str, dry_run=False, notional=750000.0):
     from datetime import datetime
     import pytz
+    target_margin = 125000.0 if (700000.0 <= notional <= 800000.0) else (200000.0 if (950000.0 <= notional <= 1050000.0) else (400000.0 if (1900000.0 <= notional <= 2100000.0) else round(notional / 5.0, 2)))
     now_str = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S IST')
     lines = [
-        f"⚡ <b>[09:20 SCALP ENGINE: 100% SINGLE-LEG TRAILING SELECTION]</b>",
+        f"⚡ <b>[09:20 SCALP ENGINE: ROLLING 4-FREQ TOP-2 SELECTION]</b>",
         f"📅 <b>Date:</b> {today_str} | ⏱️ <b>Generated:</b> {now_str}",
-        f"🎯 <b>Execution Architecture:</b> 100% Single-Leg (₹5L/Stock) | 3-Stage Profit Trailing",
-        f"📊 <b>Model Edge:</b> 76.29% Historical Win Rate | +₹48.46L Net PnL (₹5L Capital)",
+        f"🎯 <b>Execution Architecture:</b> 100% Single-Leg (₹{target_margin/100000.0:g}L Margin / ₹{target_margin*5.0/100000.0:g}L Notional @ 5x) | Option 2 (1.50% SL + 09:36 Cadence Exit)",
+        f"📊 <b>Model Edge:</b> 80.64% Historical Win Rate | +₹1.71 Cr Net PnL (₹20L Notional)",
         "",
-        "<b>🔻 TARGET 4 SHORT-SELL ORDERS:</b>"
+        f"<b>🔻 TARGET {len(top4)} SHORT-SELL ORDERS:</b>"
     ]
 
     for i, (_, row) in enumerate(top4.iterrows(), 1):
@@ -614,8 +645,8 @@ def notify_predictions(top4, today_str, dry_run=False):
 
     lines.extend([
         "",
-        "⏱️ <b>100% Single-Leg Execution & 5s Trailing Rules:</b>",
-        "• <b>09:25:00:</b> Initial Limit Sell (100% Qty / ₹5L per stock) placed on book",
+        "⏱️ <b>100% Single-Leg Execution & Protective Rules:</b>",
+        f"• <b>09:25:00:</b> Initial Limit Sell (₹{target_margin/100000.0:g}L Actual Margin / ₹{target_margin*5.0/100000.0:g}L Notional @ 5x) placed on book",
         "• <b>09:27:00:</b> Cancel unfilled SELLs & arm 5s Kotak Quotes Trailing Engine",
         "• <b>Stage 1 Initial SL (Peak &lt; +₹2,000):</b> <b>-₹5,000 (1.00%)</b>",
         "• <b>Stage 2 Profit Floor (Peak +₹2,000 to +₹3,999):</b> Locks <b>+₹1,000 (+0.20%)</b>",
@@ -654,12 +685,13 @@ def main():
     parser.add_argument('--date',       default=None, help='Override today date YYYY-MM-DD (for dry-run)')
     parser.add_argument('--dry-run',    action='store_true', help='Predict only, no live orders or monitoring')
     parser.add_argument('--reconcile',  action='store_true', help='Run only reconcile phase (after market close)')
+    parser.add_argument('--notional',   type=float, default=750000.0, help='Notional capital per trade in ₹ (default 750000 = ₹7.5L, use 2000000 for ₹20L)')
     args = parser.parse_args()
 
     import pytz
     today_str = args.date or datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
     print("=" * 80)
-    print(f"🚀 NEW 0920 SCALP PIPELINE | {today_str} | dry_run={args.dry_run}")
+    print(f"🚀 NEW 0920 SCALP PIPELINE | {today_str} | Notional=₹{args.notional/100000.0:g}L | dry_run={args.dry_run}")
     print("=" * 80)
 
     # ── Find previous trading day ──────────────────────────────────────────────
@@ -697,14 +729,14 @@ def main():
     # 2. Macro features
     macro = fetch_macro_for_date(today_str, prev_date_str)
 
-    # 3. Score and select Top 4
-    top4 = select_top4(df_features, macro, today_str, dry_run=args.dry_run)
+    # 3. Score and select Top 2
+    top4 = select_top4(df_features, macro, today_str, dry_run=args.dry_run, notional=args.notional)
     if top4.empty:
         print("❌ No stocks scored. Check model and features.")
         sys.exit(1)
 
     # 4. Save predictions CSV
-    save_predictions(top4, today_str)
+    save_predictions(top4, today_str, dry_run=args.dry_run)
 
     # 4.5 Insert into shortsell_orders DB table for Kotak Neo MIS Execution
     if not args.dry_run:
@@ -728,7 +760,7 @@ def main():
         print("\n[DRY RUN] Skipping insertion into shortsell_orders table and ledger.")
 
     # 5. Telegram alert — predictions
-    notify_predictions(top4, today_str, dry_run=args.dry_run)
+    notify_predictions(top4, today_str, dry_run=args.dry_run, notional=args.notional)
 
     print("\n✅ Morning prediction phase complete. Shortsell orders ready for Kotak Neo execution at 09:24:56 AM.")
     print("   Run with --reconcile after market close to reconcile PnL.")

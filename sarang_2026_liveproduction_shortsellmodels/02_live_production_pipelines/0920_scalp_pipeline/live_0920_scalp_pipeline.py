@@ -236,7 +236,7 @@ def retrain_and_save_model():
     return mod
 
 
-def run_scalp_pipeline(target_date_str=None, no_telegram=False):
+def run_scalp_pipeline(target_date_str=None, no_telegram=False, notional=750000.0, use_rolling_ensemble=False):
     start_time = datetime.now()
     print("=" * 75)
     print("⚡ 09:20 - 09:40 SCALP PREDICTION ENGINE (SESSION 1)")
@@ -399,7 +399,9 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
         if close_0919 < 50:
             continue
         
-        lotsize = int(1000000.0 / close_0919)
+        target_margin = 125000.0 if (700000.0 <= notional <= 800000.0) else (200000.0 if (950000.0 <= notional <= 1050000.0) else (400000.0 if (1900000.0 <= notional <= 2100000.0) else round(notional / 5.0, 2)))
+        effective_notional = target_margin * 5.0
+        lotsize = int(effective_notional / close_0919)
 
         processed_records.append({
             'stockname': stock,
@@ -426,7 +428,21 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False):
     df_candidates = df_candidates[df_candidates['stockname'] != 'TMPV'].reset_index(drop=True)
     # 4. Run Model Inference
     X = df_candidates[FEATURES].fillna(0.0)
-    df_candidates['short_prob'] = model.predict(X)
+    ens_file = os.path.join(SCRIPT_DIR, 'lgb_0920_ens_checkpoints.pkl')
+    if use_rolling_ensemble and os.path.exists(ens_file):
+        try:
+            import pickle
+            with open(ens_file, 'rb') as f:
+                ens_mods = pickle.load(f)
+            s_preds = np.sort(np.vstack([ens_mods[k].predict(X) for k in ['day', 'week', 'month', 'year']]).T, axis=1)
+            trimmed_mean = (s_preds[:, 1] + s_preds[:, 2]) / 2.0
+            df_candidates['short_prob'] = 0.50 * pd.Series(model.predict(X)).rank(pct=True) + 0.50 * pd.Series(trimmed_mean).rank(pct=True)
+            print("   ✔ [ROLLING 4-FREQ ENSEMBLE ACTIVE] Scored candidates with 4-checkpoint trimmed ensemble.")
+        except Exception as e:
+            print(f"   ⚠️ Could not score with ensemble ({e}); falling back to base model.")
+            df_candidates['short_prob'] = model.predict(X)
+    else:
+        df_candidates['short_prob'] = model.predict(X)
 
     # 5. Select Top 2 Candidates (Concentrated Alpha, Blueprint Parity)
     df_candidates = df_candidates.drop_duplicates(subset=['short_prob', 'close_0919']).reset_index(drop=True)
@@ -512,6 +528,8 @@ if __name__ == '__main__':
     parser.add_argument('--date', type=str, default=None, help="Target Date YYYY-MM-DD (defaults to latest in DB)")
     parser.add_argument('--no-telegram', action='store_true', help="Skip sending Telegram alert")
     parser.add_argument('--retrain', action='store_true', help="Retrain model and exit (weekly cron)")
+    parser.add_argument('--notional', type=float, default=750000.0, help="Notional capital tier per trade in ₹ (default 750000 = ₹7.5L tier -> ₹1.25L cash margin, supports 1000000 -> ₹2L, 2000000 -> ₹4L)")
+    parser.add_argument('--use-rolling-ensemble', action='store_true', help="Score candidates with 4-checkpoint daily rolling ensemble (lgb_0920_ens_checkpoints.pkl)")
     parser.add_argument('--put-option-mode', action='store_true', help="Enable Put Option Buying mode (₹1L/stock, Max ₹2L/day, skip <=4d to expiry)")
     parser.add_argument('--put-option-policy', type=str, default='FastLock_WR_Boost', choices=['FastLock_WR_Boost', 'ExactSync_0920', 'SmartSync_0920'], help="Put Option exit policy for 09:20 Scalp")
     parser.add_argument('--max-option-lots', type=int, default=DEFAULT_MAX_OPTION_LOTS, help="Maximum discrete lots per option trade to prevent liquidity trap")
@@ -525,4 +543,9 @@ if __name__ == '__main__':
         retrain_and_save_model()
         print("\n✅ Retrain complete. Model saved. Exiting.")
     else:
-        run_scalp_pipeline(target_date_str=args.date, no_telegram=args.no_telegram)
+        run_scalp_pipeline(
+            target_date_str=args.date,
+            no_telegram=args.no_telegram,
+            notional=args.notional,
+            use_rolling_ensemble=args.use_rolling_ensemble
+        )

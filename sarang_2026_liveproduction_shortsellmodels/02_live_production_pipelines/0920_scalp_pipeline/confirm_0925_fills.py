@@ -193,6 +193,7 @@ def run():
                         round_to_tick(filled_price + (5000.0 / float(total_qty))),
                         round_to_tick(filled_price * 1.0100)
                     )
+                    sl_initial_price = round_to_tick(filled_price * 1.0150)  # [UPDATE] Option 2A/2B: 1.50% Hard SL + 09:36 Cadence Exit
                     act_2000_price  = round_to_tick(filled_price - (2000.0 / float(total_qty)))
                     lock_1000_price = round_to_tick(filled_price - (1000.0 / float(total_qty)))
                     act_4000_price  = round_to_tick(filled_price - (4000.0 / float(total_qty)))
@@ -203,6 +204,7 @@ def run():
                         f" | +₹2k->Lock+₹1k (₹{lock_1000_price:.2f})"
                         f" | +₹4k+->Trail-₹750 (₹{lock_3250_price:.2f})"
                     )
+                    notes = f"Filled @ ₹{filled_price} | Option 2A/2B Armed: InitSL=₹{sl_initial_price:.2f} (1.50%) | 09:36 Cadence & 09:40 Exit"
                     log(
                         f"    🛡️ Armed 100% Single-Leg Trailing ({total_qty} qty): "
                         f"Init SL=₹{sl_initial_price:.2f} (-₹5k) | "
@@ -264,6 +266,7 @@ def run():
                 # Update shortsell_orders.filled_price and stop_loss_price if filled, or mark failed
                 if fill_status == 'SELL_FILLED':
                     sl_init_db = min(round_to_tick(filled_price + (5000.0 / max(quantity, 1))), round_to_tick(filled_price * 1.0100))
+                    sl_init_db = round_to_tick(filled_price * 1.0150)  # [UPDATE] Option 2A/2B: 1.50% Hard SL
                     c.execute("""
                         UPDATE shortsell_orders
                         SET filled_price = %s, stop_loss_price = %s, isvalid = '2', modtime = NOW()

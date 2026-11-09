@@ -152,6 +152,8 @@ date,stockname,qty,entry_time,entry_price,exit_time,exit_price,gross_pnl,commiss
 ### Committed Ledger Files:
 | Model & Sizing | File Path in Repository | Rows (Trades) | Win Rate | Verified Sum Net PnL |
 | :--- | :--- | :---: | :---: | :---: |
+| **Model 1 (`09:20 Rolling 4-Freq` — Top 2 @ ₹4L Margin / ₹20L Notional)** | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_rolling_4freq_top2_ledger_20L.csv` | `3,181` | **80.64%** | **+₹171.37 Lakhs (+₹1.71 Cr)** *(Kotak Charges)* |
+| **Model 1 (`09:20 Rolling 4-Freq` — Top 2 @ ₹2L Margin / ₹10L Notional)** | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_rolling_4freq_top2_ledger.csv` | `3,181` | **80.64%** | **+₹84.88 Lakhs** *(Kotak Charges)* |
 | **Model 1 (`09:20 Scalp` — Top 2 @ ₹2L Margin)** | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_scalp_top2_ledger.csv` | `3,069` | **81.46%** | **+₹83.38 Lakhs** |
 | **Model 1 (`09:20 Scalp` — Top 4 @ ₹2L Margin)** | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/verified_0920_scalp_top4_ledger.csv` | `6,120` | **77.97%** | **+₹137.81 Lakhs** |
 | **Model 2 (`09:40 Hybrid` — Top 4 @ ₹2L Margin)** | `sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0940_hybrid_pipeline/verified_0940_hybrid_top4_ledger.csv` | `5,285` | **55.72% Static** *(66.85% Dyn)* | **+₹101.15L Static** *(+₹114.65L Dyn)* |

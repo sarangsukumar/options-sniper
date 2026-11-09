@@ -20,4 +20,7 @@ if python3 reconcile_0920_scalp_pnl.py >> "$LOG_FILE" 2>&1; then
 else
     echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] ⚠️ Reconciliation encountered an issue." >> "$LOG_FILE"
 fi
+if python3 retrain_monthly_0920_scalp.py >> "$LOG_FILE" 2>&1; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] ✔ Daily Rolling 4-Freq Ensemble Checkpoints Refreshed." >> "$LOG_FILE"
+fi
 echo "" >> "$LOG_FILE"
