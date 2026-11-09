@@ -148,3 +148,88 @@ Following the comprehensive independent forensic audit of PR #7, this branch imp
      - **`FastLock_WR_Boost` (Option Ratchet Exit)**: **`+₹33.71 Lakhs` Net Profit** (`+1,685.7%` on `₹2L`, `71.15%` Net Win Rate / `83.8%` Gross Win Rate).
      - **`SmartSync_0920` (Conservative Cadence + Trail)**: **`+₹23.30 Lakhs` Net Profit** (`+1,165.1%` on `₹2L`, `72.66%` Net Win Rate).
   4. Added [`live_0920_put_option_simulator.py`](./sarang_2026_liveproduction_shortsellmodels/02_live_production_pipelines/0920_scalp_pipeline/live_0920_put_option_simulator.py) as the downstream consumer daemon that reads the staged `09:20` predictions, resolves the live Put Option strike with Smart Strike Step-Up, tracks both `ExactSync_0920` and `FastLock_WR_Boost` exits from `09:25` to `09:40 IST` with strict `₹0.05` tick compliance, and records daily live results to `daily_0920_put_option_live_ledger.csv`.
+
+
+---
+
+## 🚀 7. Amrit Institutional Review Resolution & SmartSync High-Preference Framework
+
+Following the rigorous institutional QA forensic review by Amrit (@AMRITPK), this repository establishes **SmartSync as the primary, high-preference execution standard** across both the `09:20` Scalp and `09:40` Hybrid option pipelines, paired with the full 3-year (`2024–2026`) re-simulation.
+
+### 🛡️ How All Amrit Forensic Review Issues Were Resolved
+
+| Forensic Vulnerability Raised by Amrit | Institutional Fix Applied in Pipeline & Simulation | Verification Metric in Ledger |
+| :--- | :--- | :--- |
+| **1. Non-Tick Exits (₹0.05 NSE Rule Violation)** | Implemented `round_to_nse_tick(price, direction)` across all orders (`floor` for exits, `ceil` for entries). | **0% non-₹0.05 prices** across all 3,011 rows in `SIDE_BY_SIDE_2L_CAPITAL_LEDGER_0940_HYBRID_AMRIT_COMPLIANT_2024_2026.csv`. |
+| **2. Zero Bid/Ask Spread Friction** | Enforced 2-tick realistic friction: Buy at Ask (`CMP + ₹0.05`), Sell at Bid (`CMP - ₹0.05`). | All PnL calculations deduct mandatory spread friction per leg. |
+| **3. Illiquid Penny Option Sizing Hazard** | Implemented `should_step_up_option_strike()`. Contracts with premium `< ₹5.00` or lot cost `< ₹8,000` automatically step up to `ATM_PE` or `1_ITM_PE`. | Eliminates penny contracts; bounds lots naturally to 5–15 lots while deploying ₹1.0L. |
+| **4. Runaway Lot Sizing on Low Margin** | Enforced soft lot cap at 15 lots (`SMART_STEPUP_MAX_OPTION_LOTS = 15`) to prevent market impact. | Median lot size = 8 lots; 95th percentile = 12 lots; Absolute Max = 15 lots. |
+| **5. Statutory Taxation Underestimation** | Integrated full NSE/SEBI statutory tax schedule (Brokerage ₹40/trade + STT 0.125% on sell + Exchange Turn 0.05% + SEBI + GST 18%). | Deducted trade-by-trade in all Net PnL columns. |
+| **6. Capital Recycling Margin Bleed** | Validated intraday capital release: 09:20 trades complete by 09:35–09:40, clearing ₹2.0L capital for 09:42 entry. | Zero timestamp collision; dynamic capital scaling if S1 suffers drawdown. |
+
+---
+
+### 🧠 Why SmartSync Has Higher Preference in Option Sniper
+
+In single-stock options, theta decay and midday short-covering bounces frequently turn unrealized +10% to +15% gains into scratch or losing trades before the underlying stock's cash MIS target/SL triggers. 
+
+**SmartSync solves this with an institutional trailing profit ratchet:**
+1. **Tier 1 (+3.5% Unrealized Gain):** Activates a permanent **+1.2% profit floor**.
+2. **Tier 2 (+6.0% Unrealized Gain):** Ratchets up to a permanent **+2.0% profit floor**.
+3. **Underlying SL Sync:** If the cash MIS triggers `SL_BREACH`, the option squares off immediately.
+4. **Fallback:** If profit floors are not touched, exits symmetrically with the underlying stock exit.
+
+---
+
+### 📊 Model 1: Upgraded `09:20` Top-2 Put Option Simulation (`2024–2026`)
+*Allocation: Strictly ₹1.0 Lakh per stock, Max 2 stocks/day = ₹2.0 Lakhs total capital deployed.*
+
+| Metric | `09:20` SmartSync (Preferred) | `09:20` ExactSync (Full Underlying Sync) |
+| :--- | :---: | :---: |
+| **Completed Trades** | **940** | **940** |
+| **Total Net PnL** | **+₹23,30,105.22** | **+₹38,61,775.92** |
+| **Win Rate** | **72.6%** (682 W / 258 L) | **66.9%** (629 W / 311 L) |
+| **Profit Factor** | **2.63** | **3.20** |
+| **Max Drawdown** | **₹-75,375.98** (-37.7% of margin) | **₹-1,21,754.38** (-60.9% of margin) |
+| **Annualized Sharpe Ratio** | **6.24** | **7.80** |
+| **Annualized Sortino Ratio** | **7.93** | **14.28** |
+| **Monthly Positivity** | **32 / 35 Months (91.4%)** | **32 / 35 Months (91.4%)** |
+| **Weekly Positivity** | **103 / 127 Weeks (81.1%)** | **107 / 127 Weeks (84.3%)** |
+| **Average Trade Net PnL** | **+₹2,478.84** | **+₹4,108.27** |
+
+---
+
+### 📊 Model 2: `09:40` Hybrid Put Option Simulation Across 3 Setups (`2024–2026`)
+*Allocation: Strictly ₹1.0 Lakh per stock, Max 2 stocks/day = ₹2.0 Lakhs total capital deployed.*
+
+| Performance Metric | Setup 1: Rank #1 & #2 @ 09:42 Immediate (**Champion**) | Setup 2: Rank #1 & #2 Confirmed Later | Setup 3: Confirmed Only (First 2 from Top 4) |
+| :--- | :---: | :---: | :---: |
+| **SmartSync Net PnL (Non-Expiry)** | **+₹20,65,363.33** | +₹11,70,624.53 | +₹17,09,503.66 |
+| **SmartSync Net PnL (All Weeks)** | **+₹22,46,723.20** | +₹13,11,920.37 | +₹18,36,566.86 |
+| **SmartSync Win Rate** | **74.5%** | 71.5% | 72.3% |
+| **SmartSync Profit Factor** | **4.40** | 1.93 | 1.86 |
+| **SmartSync Max Drawdown** | **₹-1,03,414.99** | ₹-2,01,767.43 | ₹-1,62,399.69 |
+| **SmartSync Sharpe Ratio** | **3.86** | 2.53 | 2.65 |
+| **SmartSync Sortino Ratio** | **8.84** | 4.46 | 4.71 |
+| **SmartSync Monthly Positivity** | **30 / 34 Months (88.2%)** | 25 / 34 Months (73.5%) | 23 / 34 Months (67.6%) |
+| **SmartSync Weekly Positivity** | **104 / 139 Weeks (74.8%)** | 90 / 139 Weeks (64.7%) | 89 / 142 Weeks (62.7%) |
+| **ExactSync Net PnL (Non-Expiry)** | **+₹20,58,070.81** | +₹8,70,543.18 | +₹12,50,390.44 |
+| **ExactSync Win Rate** | 47.0% | 48.5% | 48.8% |
+| **ExactSync Profit Factor** | 2.19 | 1.37 | 1.35 |
+| **ExactSync Max Drawdown** | ₹-1,54,543.36 | ₹-2,47,236.74 | ₹-2,84,218.05 |
+
+---
+
+### 🔥 Combined Recycled Capital Portfolio (`09:20` + `09:40` Setup 1 SmartSync)
+*Because the `09:20` Scalp exits before `09:40:00 AM` and the `09:40` Hybrid enters at `09:42:00 AM`, the exact same **₹2.0 Lakhs total capital is recycled sequentially** every single trading day with zero margin collision.*
+
+| Combined Portfolio Metric | Performance Result on ₹2.0 Lakhs Recycled Capital |
+| :--- | :---: |
+| **Total Net Realized PnL** | **+₹45,76,828.42** (**+2,288.4% Return on ₹2L**) |
+| **Peak Portfolio Drawdown (MDD)** | **₹-78,319.68** (Only **-39.2%** of daily margin) |
+| **Portfolio Sharpe Ratio (Annualized)** | **5.30** |
+| **Portfolio Sortino Ratio (Annualized)** | **12.10** |
+| **Monthly Positivity Rate** | **35 / 35 Months (100.0% Win Rate)** — *Zero Losing Months Across 3 Years* |
+| **Weekly Positivity Rate** | **115 / 141 Weeks (81.6% Profitable Weeks)** |
+| **Average Daily Net Realized PnL** | **+₹8,291.35 / Day** |
+| **Standardized Verification Ledger** | [`SIDE_BY_SIDE_2L_CAPITAL_LEDGER_0940_HYBRID_AMRIT_COMPLIANT_2024_2026.csv`](./option_simulation_ledgers/SIDE_BY_SIDE_2L_CAPITAL_LEDGER_0940_HYBRID_AMRIT_COMPLIANT_2024_2026.csv) |
