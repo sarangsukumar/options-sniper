@@ -37,6 +37,12 @@ import pymysql
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROD_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+try:
+    from reconcile_0920_options_helper import simulate_0920_option_for_trade
+except ImportError:
+    simulate_0920_option_for_trade = None
 LEDGER_CSV = os.path.join(SCRIPT_DIR, 'daily_0920_live_ledger.csv')
 BOT_SCRIPT = '/home/ubuntu/KotakCodes1/status_Info_bot.js'
 STATUS_BOT_TOKEN = "7920868588:AAE4mPlDQJWnkv9CbmHO8idiSBVnP7K0Gko"
@@ -250,7 +256,6 @@ def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False)
     with conn.cursor() as cursor:
         for d in target_dates:
             day_all_indices = df_ledger[df_ledger['date'].astype(str) == d].index.tolist()
-            f1_basket_input = {}
             eq_basket_input = {}
             stock_by_idx = {}
 
@@ -266,20 +271,7 @@ def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False)
                 except Exception:
                     lotsize = 1
 
-                # 1. Fetch Futures (scrapdata_F1) ticks from 09:25:00 to 09:42:00
-                cursor.execute(f"""
-                    SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
-                    FROM scrapdata_F1 
-                    WHERE date = '{d}' AND stockname = '{s}' 
-                      AND time >= '{d} 09:25:00' AND time <= '{d} 09:42:00'
-                      AND (isvalid = 'TRUE' OR isvalid IS NULL OR isvalid = '1' OR isvalid = '')
-                    ORDER BY time ASC
-                """)
-                ticks_f1 = cursor.fetchall()
-                if ticks_f1:
-                    f1_basket_input[idx] = {'ticks': ticks_f1, 'qty': lotsize}
-
-                # 2. Fetch Cash Equity (scrapdata) ticks from 09:25:00 to 09:42:00
+                # Fetch Cash Equity (scrapdata) ticks from 09:25:00 to 09:42:00
                 cursor.execute(f"""
                     SELECT time, CAST(price AS DECIMAL(10,2)) as price, CAST(IFNULL(high, price) AS DECIMAL(10,2)) as high, CAST(IFNULL(low, price) AS DECIMAL(10,2)) as low
                     FROM scrapdata 
@@ -292,44 +284,30 @@ def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False)
                 if ticks_eq:
                     eq_basket_input[idx] = {'ticks': ticks_eq, 'qty': lotsize}
 
-            f1_basket_res = simulate_scalp_basket(f1_basket_input, d) if f1_basket_input else {}
             eq_basket_res = simulate_scalp_basket(eq_basket_input, d) if eq_basket_input else {}
 
             for idx in day_all_indices:
                 if idx not in target_indices:
                     continue
                 s = stock_by_idx[idx]
-                res_f1 = f1_basket_res.get(idx)
                 res_eq = eq_basket_res.get(idx)
 
-                if not res_f1 and not res_eq:
-                    print(f"⚠️ {d} | {s}: Incomplete market data in both scrapdata and scrapdata_F1. Remains PENDING.")
+                if not res_eq:
+                    print(f"⚠️ {d} | {s}: Incomplete market data in scrapdata. Remains PENDING.")
                     continue
 
-                # Populate Futures fields
-                if res_f1:
-                    df_ledger.at[idx, 'f1_entry_price'] = res_f1['entry_price']
-                    df_ledger.at[idx, 'f1_exit_price'] = res_f1['exit_price']
-                    df_ledger.at[idx, 'f1_gross_pnl'] = res_f1['gross_pnl']
-                    df_ledger.at[idx, 'f1_net_pnl'] = res_f1['net_pnl']
-                    df_ledger.at[idx, 'f1_return_pct'] = res_f1['return_pct']
-                else:
-                    for col in ['f1_entry_price', 'f1_exit_price', 'f1_gross_pnl', 'f1_net_pnl', 'f1_return_pct']:
-                        df_ledger.at[idx, col] = np.nan
+                for col in ['f1_entry_price', 'f1_exit_price', 'f1_gross_pnl', 'f1_net_pnl', 'f1_return_pct']:
+                    df_ledger.at[idx, col] = np.nan
 
-                # Populate Cash Equity fields
-                if res_eq:
-                    df_ledger.at[idx, 'eq_entry_price'] = res_eq['entry_price']
-                    df_ledger.at[idx, 'eq_exit_price'] = res_eq['exit_price']
-                    df_ledger.at[idx, 'eq_gross_pnl'] = res_eq['gross_pnl']
-                    df_ledger.at[idx, 'eq_net_pnl'] = res_eq['net_pnl']
-                    df_ledger.at[idx, 'eq_return_pct'] = res_eq['return_pct']
-                else:
-                    for col in ['eq_entry_price', 'eq_exit_price', 'eq_gross_pnl', 'eq_net_pnl', 'eq_return_pct']:
-                        df_ledger.at[idx, col] = np.nan
+                # Populate Cash Equity fields (from scrapdata)
+                df_ledger.at[idx, 'eq_entry_price'] = res_eq['entry_price']
+                df_ledger.at[idx, 'eq_exit_price'] = res_eq['exit_price']
+                df_ledger.at[idx, 'eq_gross_pnl'] = res_eq['gross_pnl']
+                df_ledger.at[idx, 'eq_net_pnl'] = res_eq['net_pnl']
+                df_ledger.at[idx, 'eq_return_pct'] = res_eq['return_pct']
 
-                # Primary ledger fields (prioritize Futures if available, otherwise Cash Equity)
-                primary = res_f1 if res_f1 else res_eq
+                # Primary ledger fields strictly from scrapdata (Cash Equity)
+                primary = res_eq
 
                 df_ledger.at[idx, 'entry_price'] = primary['entry_price']
                 df_ledger.at[idx, 'exit_price'] = primary['exit_price']
@@ -344,6 +322,21 @@ def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False)
                 df_ledger.at[idx, 'status'] = 'COMPLETED'
                 df_ledger.at[idx, 'reconciled_at'] = now_ts
 
+                # Populate Put Option Simulation (ExactSync_0920 & SmartSync_0920 on ₹1L/stock)
+                if simulate_0920_option_for_trade is not None:
+                    try:
+                        opt_res = simulate_0920_option_for_trade(
+                            cursor, conn, s, d,
+                            float(primary['entry_price']),
+                            str(primary['entry_time']),
+                            str(primary['exit_time']),
+                            str(primary['exit_reason'])
+                        )
+                        for k_opt, v_opt in opt_res.items():
+                            df_ledger.at[idx, k_opt] = v_opt
+                    except Exception as e_opt:
+                        print(f"⚠️ {d} | {s}: Option simulation error: {e_opt}")
+
                 reconciled_dates.add(d)
                 completed_count += 1
 
@@ -353,96 +346,84 @@ def reconcile_scalp_trades(target_date=None, force_all=False, no_telegram=False)
     df_ledger.to_csv(LEDGER_CSV, index=False)
     print(f"\n✔ Successfully reconciled {completed_count} trade(s). Ledger updated: {LEDGER_CSV}")
 
-    # Generate Reports & Telegram Alerts for each reconciled date
+    # Generate Reports & Telegram Alerts for each reconciled date (strictly on scrapdata)
     for d in sorted(list(reconciled_dates)):
         day_df = df_ledger[(df_ledger['date'] == d) & (df_ledger['status'] == 'COMPLETED')].sort_values('rank')
         if day_df.empty:
             continue
 
-        has_f1 = 'f1_net_pnl' in day_df and day_df['f1_net_pnl'].notna().any()
-        day_gross_f1 = day_df['f1_gross_pnl'].dropna().sum() if has_f1 else 0.0
-        day_net_f1 = day_df['f1_net_pnl'].dropna().sum() if has_f1 else 0.0
-        day_net_eq = day_df['eq_net_pnl'].dropna().sum() if ('eq_net_pnl' in day_df and day_df['eq_net_pnl'].notna().any()) else day_df['net_pnl'].dropna().sum()
-
+        day_net_eq = day_df['net_pnl'].dropna().sum()
         wins = (day_df['net_pnl'] > 0).sum()
         win_rate = (wins / len(day_df)) * 100.0 if len(day_df) > 0 else 0.0
-
-        target_net = day_net_f1 if has_f1 else day_net_eq
-        pnl_color = "🟢" if target_net >= 0 else "🔴"
+        pnl_color = "🟢" if day_net_eq >= 0 else "🔴"
 
         print("\n" + "=" * 100)
-        mode_title = "FUTURES & CASH EQUITY" if has_f1 else "CASH EQUITY"
-        print(f"📊 09:20 SCALP RECONCILED PNL REPORT: {d} ({mode_title})")
+        print(f"📊 09:20 SCALP RECONCILED PNL REPORT: {d} (CASH EQUITY - scrapdata)")
         print("=" * 100)
-        if has_f1:
-            print(f"{'#':<3} | {'Stock':<10} | {'F1 Net (₹)':<12} | {'F1 Ret %':<9} | {'EQ Net (₹)':<12} | {'EQ Ret %':<9} | {'Exit Reason':<22} | {'Exit Time':<8}")
+        print(f"{'#':<3} | {'Stock':<10} | {'Net PnL (₹)':<12} | {'Return %':<9} | {'Exit Reason':<24} | {'Exit Time':<8}")
+        print("-" * 100)
+        for _, r in day_df.iterrows():
+            stk = r['stockname']
+            net_val = r.get('net_pnl', 0.0)
+            ret_val = r.get('return_pct', 0.0)
+            reason = str(r.get('exit_reason', '-'))
+            ex_t = str(r.get('exit_time', '-'))
+            print(f"{int(r['rank']):<3} | {stk:<10} | {net_val:>10,.2f}   | {ret_val:>7.2f}%  | {reason:<24} | {ex_t:<8}")
+        print("-" * 100)
+        print(f"SUMMARY: Total Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate:.1f}%")
+        if 'opt_exactsync_net_pnl' in day_df.columns and day_df['opt_exactsync_net_pnl'].notna().any():
+            opt_ex_tot = day_df['opt_exactsync_net_pnl'].dropna().sum()
+            opt_sm_tot = day_df['opt_smartsync_net_pnl'].dropna().sum()
             print("-" * 100)
+            print(f"🎯 09:20 PUT OPTION SIMULATION (₹1.0L/Stock | Max ₹2.0L | ₹0.05 Tick Compliant):")
             for _, r in day_df.iterrows():
-                stk = r['stockname']
-                f1_n = r.get('f1_net_pnl', 0.0)
-                f1_r = r.get('f1_return_pct', 0.0)
-                eq_n = r.get('eq_net_pnl', r.get('net_pnl', 0.0))
-                eq_r = r.get('eq_return_pct', r.get('return_pct', 0.0))
-                reason = str(r.get('exit_reason', '-'))
-                ex_t = str(r.get('exit_time', '-'))
-                print(f"{int(r['rank']):<3} | {stk:<10} | {f1_n:>10,.2f}   | {f1_r:>7.2f}%  | {eq_n:>10,.2f}   | {eq_r:>7.2f}%  | {reason:<22} | {ex_t:<8}")
-            print("-" * 100)
-            print(f"SUMMARY: Futures Net PnL = ₹{day_net_f1:,.2f} | Equity Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate:.1f}%")
-        else:
-            print(f"{'#':<3} | {'Stock':<10} | {'Net PnL (₹)':<12} | {'Return %':<9} | {'Exit Reason':<24} | {'Exit Time':<8}")
-            print("-" * 100)
-            for _, r in day_df.iterrows():
-                stk = r['stockname']
-                net_val = r.get('net_pnl', 0.0)
-                ret_val = r.get('return_pct', 0.0)
-                reason = str(r.get('exit_reason', '-'))
-                ex_t = str(r.get('exit_time', '-'))
-                print(f"{int(r['rank']):<3} | {stk:<10} | {net_val:>10,.2f}   | {ret_val:>7.2f}%  | {reason:<24} | {ex_t:<8}")
-            print("-" * 100)
-            print(f"SUMMARY: Total Net PnL = ₹{day_net_eq:,.2f} | Win Rate: {win_rate:.1f}%")
+                if pd.notna(r.get('opt_exactsync_net_pnl')):
+                    print(f"  #{int(r['rank'])} {r['stockname']:<10} | {r.get('opt_strike')} PE ({r.get('opt_role')}) | Lots: {int(r.get('opt_lots', 0))} (₹{r.get('opt_capital_used', 0):,.0f}) | Entry: ₹{r.get('opt_entry_price', 0):.2f} ({r.get('opt_entry_time')}) | ExactSync: ₹{r.get('opt_exactsync_exit_price', 0):.2f} ({r.get('opt_exactsync_exit_time')}) ➔ Net ₹{r.get('opt_exactsync_net_pnl', 0):+,.2f} ({r.get('opt_exactsync_ret_pct', 0):+.2f}%) | SmartSync: ₹{r.get('opt_smartsync_exit_price', 0):.2f} ({r.get('opt_smartsync_exit_time')} {r.get('opt_smartsync_exit_reason')}) ➔ Net ₹{r.get('opt_smartsync_net_pnl', 0):+,.2f} ({r.get('opt_smartsync_ret_pct', 0):+.2f}%)")
+            print(f"OPTION SUMMARY: ExactSync_0920 Net = ₹{opt_ex_tot:+,.2f} | SmartSync_0920 Net = ₹{opt_sm_tot:+,.2f}")
         print("=" * 100)
 
         # Telegram Message
-        tg_header = "[09:20 SCALP: DUAL RECONCILED PNL REPORT]" if has_f1 else "[09:20 SCALP: RECONCILED PNL REPORT]"
         tg_lines = [
-            f"{pnl_color} <b>{tg_header}</b>",
+            f"{pnl_color} <b>[09:20 SCALP: RECONCILED PNL REPORT]</b>",
             f"📅 <b>Date:</b> {d} | ⏱️ <b>Audit Time:</b> {now_ts} IST",
             f"🎯 <b>Strategy:</b> 100% Single-Leg 3-Stage Trail (-₹5,000 SL | +₹2k➔+₹1k Floor | +₹4k+➔Peak-₹750 | 09:36 Cadence)",
             "",
-            "<b>📋 EXECUTED TRADES:</b>"
+            "<b>📋 EXECUTED TRADES (scrapdata):</b>"
         ]
         for _, r in day_df.iterrows():
             t_icon = "✅" if r['net_pnl'] > 0 else "❌"
             lot_display = int(r['lotsize']) if pd.notna(r.get('lotsize')) else int(r.get('qty', 1)) if pd.notna(r.get('qty')) else 1
             reason = str(r.get('exit_reason', ''))
             reason_str = f" [{reason}]" if reason and reason != 'nan' else ""
-            if has_f1:
-                f1_n = r.get('f1_net_pnl', 0.0)
-                f1_r = r.get('f1_return_pct', 0.0)
-                eq_n = r.get('eq_net_pnl', r.get('net_pnl', 0.0))
-                eq_r = r.get('eq_return_pct', r.get('return_pct', 0.0))
-                tg_lines.append(
-                    f"  {t_icon} <b>#{int(r['rank'])} {r['stockname']}</b> (Qty {lot_display}{reason_str}):"
-                    f"\n      • <b>F1:</b> Net <b>₹{f1_n:+,.2f}</b> ({f1_r:+.2f}%)"
-                    f"\n      • <b>EQ:</b> Net <b>₹{eq_n:+,.2f}</b> ({eq_r:+.2f}%)"
-                )
-            else:
-                net_val = r.get('net_pnl', 0.0)
-                ret_val = r.get('return_pct', 0.0)
-                tg_lines.append(
-                    f"  {t_icon} <b>#{int(r['rank'])} {r['stockname']}</b> (Qty {lot_display}{reason_str}):"
-                    f"\n      • Net: <b>₹{net_val:+,.2f}</b> ({ret_val:+.2f}%)"
-                )
+            net_val = r.get('net_pnl', 0.0)
+            ret_val = r.get('return_pct', 0.0)
+            tg_lines.append(
+                f"  {t_icon} <b>#{int(r['rank'])} {r['stockname']}</b> (Qty {lot_display}{reason_str}):"
+                f"\n      • Net: <b>₹{net_val:+,.2f}</b> ({ret_val:+.2f}%)"
+            )
         total_charges = day_df['charges'].sum() if 'charges' in day_df and day_df['charges'].notna().any() else len(day_df) * 300.0
         tg_lines.append("")
         tg_lines.append(f"⚡ <b>Statutory Charges:</b> -₹{total_charges:,.2f}")
-        if has_f1:
-            tg_lines.extend([
-                f"🏆 <b>TOTAL FUTURES NET PNL:</b> <b>₹{day_net_f1:+,.2f}</b> ({win_rate:.1f}% Win Rate)",
-                f"📊 <b>TOTAL EQUITY NET PNL:</b> <b>₹{day_net_eq:+,.2f}</b>"
-            ])
-        else:
-            tg_lines.append(f"🏆 <b>TOTAL NET PNL:</b> <b>₹{day_net_eq:+,.2f}</b> ({win_rate:.1f}% Win Rate)")
+        tg_lines.append(f"🏆 <b>TOTAL CASH MIS NET PNL:</b> <b>₹{day_net_eq:+,.2f}</b> ({win_rate:.1f}% Win Rate)")
+
+        if 'opt_exactsync_net_pnl' in day_df.columns and day_df['opt_exactsync_net_pnl'].notna().any():
+            opt_ex_tot = day_df['opt_exactsync_net_pnl'].dropna().sum()
+            opt_sm_tot = day_df['opt_smartsync_net_pnl'].dropna().sum()
+            tg_lines.append("")
+            tg_lines.append("🔥 <b>PUT OPTION SIMULATION (₹1.0L/Stock | Max ₹2.0L):</b>")
+            for _, r in day_df.iterrows():
+                if pd.notna(r.get('opt_exactsync_net_pnl')):
+                    ex_n = r.get('opt_exactsync_net_pnl', 0.0)
+                    sm_n = r.get('opt_smartsync_net_pnl', 0.0)
+                    ex_ic = "✅" if ex_n > 0 else "❌"
+                    sm_ic = "✅" if sm_n > 0 else "❌"
+                    tg_lines.append(
+                        f"  • <b>#{int(r['rank'])} {r['stockname']} {r.get('opt_strike')} PE</b> ({r.get('opt_role')} | {int(r.get('opt_lots', 0))} Lots = ₹{r.get('opt_capital_used', 0):,.0f} | Buy ₹{r.get('opt_entry_price', 0):.2f}):"
+                        f"\n      {ex_ic} <b>ExactSync_0920:</b> Sell ₹{r.get('opt_exactsync_exit_price', 0):.2f} @ {r.get('opt_exactsync_exit_time')} ➔ <b>₹{ex_n:+,.2f}</b> ({r.get('opt_exactsync_ret_pct', 0):+.2f}%)"
+                        f"\n      {sm_ic} <b>SmartSync_0920:</b> Sell ₹{r.get('opt_smartsync_exit_price', 0):.2f} @ {r.get('opt_smartsync_exit_time')} [{r.get('opt_smartsync_exit_reason')}] ➔ <b>₹{sm_n:+,.2f}</b> ({r.get('opt_smartsync_ret_pct', 0):+.2f}%)"
+                    )
+            tg_lines.append(f"🎯 <b>ExactSync_0920 Total Net:</b> <b>₹{opt_ex_tot:+,.2f}</b>")
+            tg_lines.append(f"🛡️ <b>SmartSync_0920 Total Net:</b> <b>₹{opt_sm_tot:+,.2f}</b>")
 
         if not no_telegram:
             send_telegram_alert("\n".join(tg_lines))
