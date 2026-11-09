@@ -38,6 +38,24 @@ try:
 except ImportError:
     _insert_ss_orders = None
 
+# Institutional QA Execution Guardrails & Compliance
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+COMMON_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, '..', 'common'))
+if COMMON_DIR not in sys.path:
+    sys.path.insert(0, COMMON_DIR)
+try:
+    from qa_execution_guardrails import (
+        round_to_nse_tick,
+        calculate_option_lots,
+        DEFAULT_MAX_OPTION_LOTS,
+        stage_option_orders_safely
+    )
+except ImportError:
+    round_to_nse_tick = lambda p, **kw: max(0.05, round(p, 2))
+    calculate_option_lots = lambda c, p, l, max_lots=5: min(int(c / (p * l)), max_lots) if p > 0 and l > 0 else 1
+    DEFAULT_MAX_OPTION_LOTS = 5
+    stage_option_orders_safely = None
+
 warnings.filterwarnings('ignore')
 
 # Configuration & Paths
@@ -440,6 +458,15 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False, notional=750000.
     print("=" * 75)
 
     # Save CSV output
+    is_option_mode = (os.environ.get('PUT_OPTION_MODE') == '1')
+    if is_option_mode:
+        top2['put_option_capital_per_stock'] = 100000
+        top2['put_option_max_daily_capital'] = 200000
+        top2['put_option_strike_role'] = '1_OTM_PE_OR_ATM_PE'
+        top2['put_option_exit_policy'] = os.environ.get('PUT_OPTION_POLICY', 'FastLock_WR_Boost')
+        top2['put_option_expiry_skip_days'] = 4
+        top2['put_option_max_lots'] = int(os.environ.get('MAX_OPTION_LOTS', DEFAULT_MAX_OPTION_LOTS))
+        print(f"   🔥 [PUT OPTION BUY MODE ACTIVE] ₹1.0L/Stock (Max ₹2.0L/Day) | Role: 1_OTM_PE/ATM_PE | Policy: {top2['put_option_exit_policy'].iloc[0]} | Skip Last 4 Days of Expiry | Max Lots: {top2['put_option_max_lots'].iloc[0]}")
     top2.to_csv(OUTPUT_CSV, index=False)
     print(f"\n✔ Plan saved to: {OUTPUT_CSV}")
 
@@ -447,12 +474,21 @@ def run_scalp_pipeline(target_date_str=None, no_telegram=False, notional=750000.
     append_to_daily_ledger(target_date_str, top2)
 
     # Insert into shortsell_orders table for automated Kotak MIS order placement
-    print(f"\n📋 Inserting into shortsell_orders for Kotak MIS automation...")
-    if _insert_ss_orders:
-        top2_for_insert = top2.rename(columns={'close_0919': 'close_0919', 'lotsize': 'quantity'})
-        _insert_ss_orders(top2_for_insert, model_name='0920_SCALP', trade_date=target_date_str)
+    if is_option_mode:
+        print(f"\n🛡️ [QA GUARDRAIL ACTIVE] PUT_OPTION_MODE is enabled:")
+        print(f"   🚫 Suppressed silent insertion into Cash MIS Equity table (`shortsell_orders`).")
+        if stage_option_orders_safely:
+            staging_path = stage_option_orders_safely(top2, model_name='0920_SCALP_PE', trade_date=target_date_str, output_dir=SCRIPT_DIR)
+            print(f"   ✅ Staged option orders safely to: {staging_path}")
+        else:
+            print(f"   ℹ️ Option staging ready in {OUTPUT_CSV} for options execution daemon.")
     else:
-        print("  ⚠️  insert_shortsell_orders not available — skipping DB insert")
+        print(f"\n📋 Inserting into shortsell_orders for Kotak MIS automation...")
+        if _insert_ss_orders:
+            top2_for_insert = top2.rename(columns={'close_0919': 'close_0919', 'lotsize': 'quantity'})
+            _insert_ss_orders(top2_for_insert, model_name='0920_SCALP', trade_date=target_date_str)
+        else:
+            print("  ⚠️  insert_shortsell_orders not available — skipping DB insert")
 
     # 6. Format and Send Telegram Message
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')
@@ -494,7 +530,14 @@ if __name__ == '__main__':
     parser.add_argument('--retrain', action='store_true', help="Retrain model and exit (weekly cron)")
     parser.add_argument('--notional', type=float, default=750000.0, help="Notional capital tier per trade in ₹ (default 750000 = ₹7.5L tier -> ₹1.25L cash margin, supports 1000000 -> ₹2L, 2000000 -> ₹4L)")
     parser.add_argument('--use-rolling-ensemble', action='store_true', help="Score candidates with 4-checkpoint daily rolling ensemble (lgb_0920_ens_checkpoints.pkl)")
+    parser.add_argument('--put-option-mode', action='store_true', help="Enable Put Option Buying mode (₹1L/stock, Max ₹2L/day, skip <=4d to expiry)")
+    parser.add_argument('--put-option-policy', type=str, default='FastLock_WR_Boost', choices=['FastLock_WR_Boost', 'ExactSync_0920', 'SmartSync_0920'], help="Put Option exit policy for 09:20 Scalp")
+    parser.add_argument('--max-option-lots', type=int, default=DEFAULT_MAX_OPTION_LOTS, help="Maximum discrete lots per option trade to prevent liquidity trap")
     args = parser.parse_args()
+    if args.put_option_mode:
+        os.environ['PUT_OPTION_MODE'] = '1'
+        os.environ['PUT_OPTION_POLICY'] = args.put_option_policy
+        os.environ['MAX_OPTION_LOTS'] = str(args.max_option_lots)
 
     if args.retrain:
         retrain_and_save_model()

@@ -15,12 +15,20 @@ echo "==========================================================================
 echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] 📊 Running 09:20 Scalp Evening Reconciler" >> "$LOG_FILE"
 echo "==========================================================================" >> "$LOG_FILE"
 
-if python3 reconcile_0920_scalp_pnl.py >> "$LOG_FILE" 2>&1; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] ✔ 09:20 Scalp Reconciliation Completed Successfully." >> "$LOG_FILE"
+TODAY_IST=$(TZ=Asia/Kolkata date '+%Y-%m-%d')
+
+if [ $# -eq 0 ]; then
+    ARGS=(--date "$TODAY_IST" --force-all)
 else
-    echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] ⚠️ Reconciliation encountered an issue." >> "$LOG_FILE"
+    ARGS=("$@")
+fi
+
+if python3 reconcile_0920_scalp_pnl.py "${ARGS[@]}" >> "$LOG_FILE" 2>&1; then
+    echo "[$(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST')] ✔ 09:20 Scalp & Put Option (ExactSync_0920 + SmartSync_0920) Reconciliation Completed Successfully." >> "$LOG_FILE"
+else
+    echo "[$(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST')] ⚠️ Reconciliation encountered an issue." >> "$LOG_FILE"
 fi
 if python3 retrain_monthly_0920_scalp.py >> "$LOG_FILE" 2>&1; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S IST')] ✔ Daily Rolling 4-Freq Ensemble Checkpoints Refreshed." >> "$LOG_FILE"
+    echo "[$(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST')] ✔ Daily Rolling 4-Freq Ensemble Checkpoints Refreshed." >> "$LOG_FILE"
 fi
 echo "" >> "$LOG_FILE"
