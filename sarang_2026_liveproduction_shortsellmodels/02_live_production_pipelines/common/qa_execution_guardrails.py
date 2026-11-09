@@ -21,6 +21,25 @@ from datetime import datetime
 
 NSE_TICK_SIZE = 0.05
 DEFAULT_MAX_OPTION_LOTS = 5  # Realistic order book depth limit for single-stock options
+SMART_STEPUP_MAX_OPTION_LOTS = 15  # Soft liquidity cap when Smart Strike Step-Up (min_prem>=5, min_lot_cost>=8000) is active
+MIN_OPTION_PREMIUM_RS = 5.0
+MIN_OPTION_LOT_COST_RS = 8000.0
+
+
+def should_step_up_option_strike(
+    premium_cmp: float,
+    lot_size: int,
+    min_premium: float = MIN_OPTION_PREMIUM_RS,
+    min_lot_cost: float = MIN_OPTION_LOT_COST_RS
+) -> bool:
+    """
+    Returns True if a 1_OTM_PE contract is a cheap penny/low-notional option
+    that would cause excessive lot counts (e.g. >15-229 lots for ₹1L capital),
+    signaling the execution daemon to step up 1 strike to ATM_PE or 1_ITM_PE.
+    """
+    if premium_cmp is None or premium_cmp <= 0 or lot_size <= 0:
+        return True
+    return (premium_cmp < min_premium) or ((premium_cmp * lot_size) < min_lot_cost)
 
 
 def round_to_nse_tick(price: float, direction: str = 'floor', tick: float = NSE_TICK_SIZE) -> float:
