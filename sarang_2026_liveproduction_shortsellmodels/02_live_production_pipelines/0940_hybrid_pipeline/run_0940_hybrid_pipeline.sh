@@ -80,6 +80,10 @@ else
     echo "❌ Error: Step 3 (Order Placement) failed." >> "$LOG_FILE"
 fi
 
+# Launch Real-Time 09:40 Confirmation Watcher (runs in background from 09:43 to 10:45 AM)
+echo "[Confirmation Watcher] Launching Real-Time Watcher daemon (09:43 - 10:45 AM)..." >> "$LOG_FILE"
+nohup python3 "$DIR/monitor_0940_confirmed_alerts.py" >> "$DIR/watcher_0940.log" 2>&1 &
+
 # Step 4 (Post-Entry Background Sync): Download F1 ticks into scrapdata_F1 for evening reconciliation
 echo "[Step 4] Syncing F1 ticks into scrapdata_F1 (post-order placement)..." >> "$LOG_FILE"
 cd /home/ubuntu/daily_prediction_sytem_Dynamic_threshold
